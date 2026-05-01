@@ -8,6 +8,7 @@ use App\Models\User;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
+use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Str;
 use Illuminate\Validation\Rules\Password;
 
@@ -256,6 +257,82 @@ class UserController extends Controller
         ]);
     }
 
+    public function mapboxReverseGeocode(Request $request): JsonResponse
+    {
+        if ($response = $this->requirePatientNavigationAccess()) {
+            return $response;
+        }
+
+        $validated = $request->validate([
+            'lng' => ['required', 'numeric', 'between:-180,180'],
+            'lat' => ['required', 'numeric', 'between:-90,90'],
+        ]);
+
+        return $this->sendMapboxRequest(
+            "https://api.mapbox.com/geocoding/v5/mapbox.places/{$validated['lng']},{$validated['lat']}.json",
+            ['limit' => 1]
+        );
+    }
+
+    public function mapboxSearch(Request $request): JsonResponse
+    {
+        if ($response = $this->requirePatientNavigationAccess()) {
+            return $response;
+        }
+
+        $validated = $request->validate([
+            'q' => ['required', 'string', 'max:255'],
+            'proximity_lng' => ['nullable', 'numeric', 'between:-180,180'],
+            'proximity_lat' => ['nullable', 'numeric', 'between:-90,90'],
+        ]);
+
+        $params = [
+            'limit' => 5,
+            'autocomplete' => 'true',
+            'language' => 'en',
+            'country' => 'PH',
+            'types' => 'poi,address,place,locality,neighborhood',
+        ];
+
+        if (isset($validated['proximity_lng'], $validated['proximity_lat'])) {
+            $params['proximity'] = $validated['proximity_lng'] . ',' . $validated['proximity_lat'];
+        }
+
+        return $this->sendMapboxRequest(
+            'https://api.mapbox.com/geocoding/v5/mapbox.places/' . rawurlencode($validated['q']) . '.json',
+            $params
+        );
+    }
+
+    public function mapboxDirections(Request $request): JsonResponse
+    {
+        if ($response = $this->requirePatientNavigationAccess()) {
+            return $response;
+        }
+
+        $validated = $request->validate([
+            'profile' => ['required', 'in:walking,driving'],
+            'start_lng' => ['required', 'numeric', 'between:-180,180'],
+            'start_lat' => ['required', 'numeric', 'between:-90,90'],
+            'end_lng' => ['required', 'numeric', 'between:-180,180'],
+            'end_lat' => ['required', 'numeric', 'between:-90,90'],
+        ]);
+
+        $coordinates = implode(',', [$validated['start_lng'], $validated['start_lat']])
+            . ';'
+            . implode(',', [$validated['end_lng'], $validated['end_lat']]);
+
+        return $this->sendMapboxRequest(
+            "https://api.mapbox.com/directions/v5/mapbox/{$validated['profile']}/{$coordinates}",
+            [
+                'geometries' => 'geojson',
+                'overview' => 'full',
+                'steps' => 'true',
+                'language' => 'en',
+            ]
+        );
+    }
+
     public function store(Request $request)
     {
         $validated = $request->validate([
@@ -344,5 +421,53 @@ class UserController extends Controller
             ->first();
 
         return $pairing?->viUser;
+    }
+
+    private function requirePatientNavigationAccess(): ?JsonResponse
+    {
+        /** @var \App\Models\User|null $patient */
+        $patient = Auth::user();
+
+        if ($patient && $patient->role === 'vi') {
+            return null;
+        }
+
+        return response()->json([
+            'message' => 'Please log in as a navigator user first to use navigation.',
+        ], 403);
+    }
+
+    private function sendMapboxRequest(string $url, array $params): JsonResponse
+    {
+        $token = config('services.mapbox.token');
+
+        if (!is_string($token) || trim($token) === '') {
+            return response()->json([
+                'message' => 'Mapbox is not configured. Please add MAPBOX_TOKEN to Railway variables.',
+            ], 500);
+        }
+
+        try {
+            $mapboxResponse = Http::acceptJson()
+                ->withOptions(['proxy' => ''])
+                ->timeout(15)
+                ->get($url, array_merge($params, [
+                    'access_token' => trim($token),
+                ]));
+        } catch (\Throwable) {
+            return response()->json([
+                'message' => 'Unable to reach Mapbox right now. Please check the server network and try again.',
+            ], 502);
+        }
+
+        $data = $mapboxResponse->json();
+
+        if (!$mapboxResponse->ok()) {
+            return response()->json([
+                'message' => $data['message'] ?? $data['code'] ?? 'Mapbox could not complete the navigation request.',
+            ], $mapboxResponse->status());
+        }
+
+        return response()->json($data);
     }
 }

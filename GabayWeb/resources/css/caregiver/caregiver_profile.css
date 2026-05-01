@@ -1,0 +1,201 @@
+:root {
+    --bg: linear-gradient(135deg, #021b2e, #0a2a45);
+    --glass: rgba(255, 255, 255, 0.06);
+    --border: rgba(255, 255, 255, 0.15);
+    --primary: #053F6B;
+    --text: #ffffff;
+    --muted: #a0aec0;
+}
+
+.main-content {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    gap: 20px;
+    height: calc(100vh - 40px);
+    overflow: hidden;
+}
+
+.glass {
+    background: var(--glass);
+    backdrop-filter: blur(12px);
+    border: 1px solid var(--border);
+}
+
+.Profile-container {
+    flex: 1;
+    padding: 40px;
+    border-radius: 25px;
+    background: radial-gradient(circle at top right, #084777 20%, transparent 70%), var(--glass);
+    display: grid;
+    grid-template-columns: 240px 1fr;
+    gap: 25px;
+    height: 100%;
+    overflow: hidden;
+}
+
+.Profile-container .user-profile {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: flex-start;
+}
+
+.Profile-container .user-profile .avatar {
+    width: 130px;
+    height: 130px;
+    border-radius: 50%;
+    object-fit: cover;
+    margin-bottom: 20px;
+}
+
+.Profile-container .user-profile h3 {
+    margin-bottom: 2px;
+    font-size: 18px;
+}
+
+.Profile-container .user-profile .location {
+    color: var(--muted);
+}
+
+.Profile-container .user-profile .role {
+    color: white;
+    background-color: #00AEFF;
+    border-radius: 15px;
+    padding: 3px 10px;
+    font-size: 14px;
+    margin-top: 15px;
+}
+
+.personal-info {
+    display: flex;
+    flex-direction: column;
+    gap: 25px;
+}
+
+.personal-info h2 {
+    font-size: 20px;
+    font-weight: 600;
+}
+
+.row {
+    display: flex;
+    gap: 15px;
+}
+
+.input-group {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+}
+
+label {
+    font-size: 12px;
+    margin-bottom: 5px;
+    color: white;
+}
+
+input,
+select {
+    width: 100%;
+    height: 44px;
+    padding: 12px 14px;
+    border-radius: 12px;
+    border: 1px solid #1795cf8e;
+    background: rgba(255, 255, 255, 0.05);
+    color: white;
+    outline: none;
+    box-sizing: border-box;
+}
+
+input[type="date"] {
+    cursor: pointer;
+    color-scheme: dark;
+}
+
+select {
+    cursor: pointer;
+}
+
+select option {
+    background: #0a2a45;
+    color: white;
+}
+
+.gender-wrapper {
+    display: flex;
+    justify-content: flex-start;
+}
+
+.form-options {
+    display: flex;
+    gap: 20px;
+    align-items: center;
+    width: fit-content;
+    /* prevents stretching */
+}
+
+
+.gender-radio {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    cursor: pointer;
+}
+
+.gender-radio input {
+    display: none;
+}
+
+.gender-radio .circle {
+    width: 16px;
+    height: 16px;
+    border-radius: 50%;
+    border: 2px solid #5ECCFF;
+    position: relative;
+}
+
+.gender-radio input:checked+.circle::after {
+    content: "";
+    width: 8px;
+    height: 8px;
+    background: #5ECCFF;
+    border-radius: 50%;
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+}
+
+.button-row {
+    display: flex;
+    gap: 15px;
+}
+
+.btn {
+    flex: 1;
+    padding: 12px;
+    border-radius: 12px;
+    border: 1px solid var(--border);
+    cursor: pointer;
+}
+
+.btn-discard {
+    background: transparent;
+    color: white;
+}
+
+.btn-save {
+    background: #00AEFF;
+    color: white;
+}
+
+@media (max-width: 900px) {
+    .Profile-container {
+        grid-template-columns: 1fr;
+    }
+
+    .row {
+        flex-direction: column;
+    }
+}

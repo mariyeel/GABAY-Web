@@ -39,4 +39,8 @@ return [
         'credentials' => env('FIREBASE_CREDENTIALS'),
     ],
 
+    'mapbox' => [
+        'token' => env('MAPBOX_TOKEN'),
+    ],
+
 ];

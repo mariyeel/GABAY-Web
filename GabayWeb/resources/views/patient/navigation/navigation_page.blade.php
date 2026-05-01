@@ -681,7 +681,13 @@
     </main>
 
     <script>
-        mapboxgl.accessToken = "{{ env('MAPBOX_TOKEN') }}";
+        const mapboxToken = @json(config('services.mapbox.token'));
+        mapboxgl.accessToken = mapboxToken || '';
+        const mapboxApiRoutes = {
+            reverseGeocode: @json(route('patient.navigation.mapbox.reverse', [], false)),
+            search: @json(route('patient.navigation.mapbox.search', [], false)),
+            directions: @json(route('patient.navigation.mapbox.directions', [], false)),
+        };
 
         const currentLocationInput = document.getElementById('current-location');
         const destinationInput = document.getElementById('destination');
@@ -720,6 +726,14 @@
 
         const NAVIGATION_MANEUVER_THRESHOLD_METERS = 30;
 
+        if (!mapboxgl.accessToken) {
+            setStatus('Mapbox is not configured. Please add MAPBOX_TOKEN to the server environment variables.');
+            buildRouteButton.disabled = true;
+            startNavigationButton.disabled = true;
+            refreshLocationButton.disabled = true;
+            throw new Error('MAPBOX_TOKEN is not configured.');
+        }
+
         const map = new mapboxgl.Map({
             container: 'map',
             style: 'mapbox://styles/mapbox/navigation-night-v1',
@@ -730,6 +744,31 @@
         function setStatus(message) {
             routeStatus.textContent = message;
             mapStatus.textContent = message;
+        }
+
+        async function fetchNavigationJson(url) {
+            let response;
+
+            try {
+                response = await fetch(url, {
+                    headers: {
+                        'Accept': 'application/json',
+                    },
+                    credentials: 'same-origin',
+                });
+            } catch (error) {
+                console.error(error);
+                throw new Error(
+                'Unable to contact the navigation service. Please check your connection and try again.');
+            }
+
+            const data = await response.json().catch(() => ({}));
+
+            if (!response.ok) {
+                throw new Error(data.message || 'Unable to complete the navigation request right now.');
+            }
+
+            return data;
         }
 
         function setActionState(isLoading, trigger = 'preview') {
@@ -911,7 +950,7 @@
             }
 
             const data = await sendNavigationSessionRequest(
-                `{{ route('patient.navigation.session.start') }}`,
+                `{{ route('patient.navigation.session.start', [], false) }}`,
                 'POST', {
                     origin: state.currentPlaceLabel,
                     destination: state.destinationFeature.place_name,
@@ -1112,41 +1151,27 @@
 
         async function reverseGeocode(coords) {
             const [lng, lat] = coords;
-            const response = await fetch(
-                `https://api.mapbox.com/geocoding/v5/mapbox.places/${lng},${lat}.json?limit=1&access_token=${mapboxgl.accessToken}`
-            );
+            const params = new URLSearchParams({
+                lng,
+                lat,
+            });
 
-            if (!response.ok) {
-                throw new Error('Unable to describe current location.');
-            }
-
-            const data = await response.json();
+            const data = await fetchNavigationJson(`${mapboxApiRoutes.reverseGeocode}?${params.toString()}`);
             return data.features?.[0]?.place_name || `${lat.toFixed(5)}, ${lng.toFixed(5)}`;
         }
 
         async function searchDestinations(query) {
             const params = new URLSearchParams({
+                q: query,
                 limit: '5',
-                access_token: mapboxgl.accessToken,
-                autocomplete: 'true',
-                language: 'en',
-                country: 'PH',
-                types: 'poi,address,place,locality,neighborhood',
             });
 
             if (state.currentCoordinates) {
-                params.set('proximity', state.currentCoordinates.join(','));
+                params.set('proximity_lng', state.currentCoordinates[0]);
+                params.set('proximity_lat', state.currentCoordinates[1]);
             }
 
-            const response = await fetch(
-                `https://api.mapbox.com/geocoding/v5/mapbox.places/${encodeURIComponent(query)}.json?${params.toString()}`
-            );
-
-            if (!response.ok) {
-                throw new Error('Unable to find the destination.');
-            }
-
-            const data = await response.json();
+            const data = await fetchNavigationJson(`${mapboxApiRoutes.search}?${params.toString()}`);
             return data.features || [];
         }
 
@@ -1227,19 +1252,29 @@
             let lastErrorMessage = 'No route could be generated.';
 
             for (const profile of profiles) {
-                const directionsUrl =
-                    `https://api.mapbox.com/directions/v5/mapbox/${profile}/${startLng},${startLat};${endLng},${endLat}?geometries=geojson&overview=full&steps=true&language=en&access_token=${mapboxgl.accessToken}`;
-                const response = await fetch(directionsUrl);
-                const data = await response.json().catch(() => ({}));
+                const params = new URLSearchParams({
+                    profile,
+                    start_lng: startLng,
+                    start_lat: startLat,
+                    end_lng: endLng,
+                    end_lat: endLat,
+                });
 
-                if (response.ok && data.routes?.[0]) {
-                    return {
-                        route: data.routes[0],
-                        profile,
-                    };
+                try {
+                    const data = await fetchNavigationJson(`${mapboxApiRoutes.directions}?${params.toString()}`);
+
+                    if (data.routes?.[0]) {
+                        return {
+                            route: data.routes[0],
+                            profile,
+                        };
+                    }
+                } catch (error) {
+                    lastErrorMessage = error.message || `Unable to load ${profile} directions.`;
+                    continue;
                 }
 
-                lastErrorMessage = data.message || data.code || `Unable to load ${profile} directions.`;
+                lastErrorMessage = `Unable to load ${profile} directions.`;
             }
 
             if (String(lastErrorMessage).toLowerCase().includes('maximum distance')) {

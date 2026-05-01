@@ -21,6 +21,9 @@ Route::get('/caregiver/dashboard', [UserController::class, 'caregiverDashboard']
 Route::post('/caregiver/connect', [UserController::class, 'connectPatient'])->name('caregiver.connect');
 Route::get('/patient/dashboard', [UserController::class, 'patientDashboard'])->name('dashboard.patient');
 Route::get('/patient/navigation', [UserController::class, 'patientNavigation'])->name('patient.navigation');
+Route::get('/patient/navigation/mapbox/reverse-geocode', [UserController::class, 'mapboxReverseGeocode'])->name('patient.navigation.mapbox.reverse');
+Route::get('/patient/navigation/mapbox/search', [UserController::class, 'mapboxSearch'])->name('patient.navigation.mapbox.search');
+Route::get('/patient/navigation/mapbox/directions', [UserController::class, 'mapboxDirections'])->name('patient.navigation.mapbox.directions');
 Route::get('/patient/history', [UserController::class, 'patientHistory'])->name('patient.history');
 Route::post('/patient/navigation/session', [UserController::class, 'startNavigationSession'])->name('patient.navigation.session.start');
 Route::patch('/patient/navigation/session/{navigationSession}', [UserController::class, 'completeNavigationSession'])->name('patient.navigation.session.update');

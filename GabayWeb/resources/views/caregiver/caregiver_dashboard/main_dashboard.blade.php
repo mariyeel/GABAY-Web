@@ -41,116 +41,193 @@
             min-height: 100vh;
         }
 
+        /* SIDEBAR */
         .sidebar {
-            width: 280px;
-            background: linear-gradient(180deg, #0d2640 0%, #06111a 100%);
-            padding: 40px 24px;
+            width: 260px;
+            min-height: calc(100vh - 32px);
+            padding: 2rem;
+            border-radius: 20px;
             display: flex;
             flex-direction: column;
-            border-right: 1px solid rgba(255, 255, 255, 0.05);
-            position: sticky;
-            top: 0;
-            height: 100vh;
+            background: radial-gradient(circle at right, #0C65A9 0%, transparent 80%), var(--glass);
+            backdrop-filter: blur(12px);
+            border: 1px solid var(--border);
         }
 
+        /* LOGO */
         .logo {
-            font-size: 1.5rem;
-            font-weight: 700;
-            letter-spacing: 2px;
-            margin-bottom: 50px;
             display: flex;
             align-items: center;
             gap: 10px;
-            color: #ffffff;
-        }
-
-        .logo-mark {
-            display: inline-flex;
-            align-items: center;
+            margin-bottom: 30px;
             justify-content: center;
-            width: 28px;
-            height: 28px;
-            border-radius: 50%;
-            background: rgba(33, 150, 243, 0.12);
-            color: var(--accent-cyan);
         }
 
-        .profile-section {
+        .logo-icon {
+            width: 30px;
+            height: 30px;
+        }
+
+        .logo-icon img {
+            width: 100%;
+            height: 100%;
+            object-fit: contain;
+        }
+
+        .logo-text {
+            font-size: 20px;
+            font-weight: 700;
+            letter-spacing: 2px;
+        }
+
+        /* PROFILE */
+        .user-profile {
             text-align: center;
-            margin-bottom: 40px;
+            margin-top: 5%;
+            margin-bottom: 15%;
+        }
+
+        .user-profile h3 {
+            font-size: 15px;
+            font-weight: 500;
+        }
+
+        .user-profile p {
+            font-size: 12px;
+            color: #ffffff69;
         }
 
         .avatar {
             width: 80px;
-            height: 80px;
-            background: rgba(255, 255, 255, 0.1);
-            border: 2px solid var(--accent-blue);
             border-radius: 50%;
+            border: 3px solid #2a85ff;
+        }
+
+        /* NAV */
+        .nav-menu {
+            display: flex;
+            flex-direction: column;
+            gap: 10px;
+        }
+
+        .nav-menu a {
             display: flex;
             align-items: center;
-            justify-content: center;
-            margin: 0 auto 15px;
-            font-size: 1.8rem;
-            font-weight: 600;
-            letter-spacing: 2px;
-            text-transform: uppercase;
+            gap: 10px;
+            padding: 12px;
+            text-decoration: none;
+            color: #ffffff;
+            border-radius: 8px;
+            font-size: 14px;
+            transition: 0.2s;
         }
 
-        .profile-name {
-            font-weight: 600;
-            color: #fff;
+        .nav-menu a i {
+            font-size: 16px;
+            min-width: 18px;
+            color: #5ECCFF;
         }
 
-        .profile-role {
-            font-size: 0.7rem;
-            color: var(--text-dim);
-            margin-top: 4px;
+        .nav-menu a:hover {
+            background: #2a73aa6e;
         }
 
-        .nav-menu {
-            list-style: none;
-            flex-grow: 1;
+        .nav-menu a.active {
+            background: #2A73AA;
         }
 
-        .nav-item {
-            margin-bottom: 8px;
-        }
-
-        .nav-link,
-        .logout-button {
-            width: 100%;
-            padding: 14px 20px;
-            border-radius: 12px;
+        /* LOGOUT */
+        .logout-btn {
+            margin-top: auto;
             display: flex;
+            align-items: center;
+            gap: 10px;
+            padding: 12px;
+            width: 100%;
+            background: transparent;
+            border: none;
+            color: #ffffff;
+            cursor: pointer;
+            border-radius: 8px;
+            font-size: 14px;
+        }
+
+        .logout-btn:hover {
+            color: #5ECCFF;
+        }
+
+        /* MODAL */
+        .modal-overlay {
+            position: fixed;
+            inset: 0;
+            background: rgba(0, 0, 0, 0.6);
+            backdrop-filter: blur(8px);
+            display: none;
+            justify-content: center;
+            align-items: center;
+            z-index: 1000;
+        }
+
+        .modal-content {
+            width: 400px;
+            padding: 40px;
+            text-align: center;
+            border-radius: 24px;
+            display: flex;
+            flex-direction: column;
             align-items: center;
             gap: 15px;
-            color: var(--text-dim);
-            text-decoration: none;
-            background: transparent;
-            border: 0;
+        }
+
+        .modal-icon {
+            font-size: 40px;
+            color: #00AEFF;
+        }
+
+        .modal-content h2 {
+            font-size: 22px;
+            font-weight: 600;
+        }
+
+        .modal-content p {
+            color: var(--muted);
+            font-size: 14px;
+            margin-bottom: 20px;
+        }
+
+        .modal-buttons {
+            display: flex;
+            gap: 15px;
+            width: 100%;
+        }
+
+        .btn-cancel,
+        .btn-logout-confirm {
+            flex: 1;
+            padding: 12px;
+            border-radius: 12px;
+            border: none;
             cursor: pointer;
-            transition: 0.25s ease;
-            font-size: 0.95rem;
+            font-weight: 600;
         }
 
-        .nav-link:hover,
-        .logout-button:hover {
-            background: rgba(255, 255, 255, 0.05);
-            color: #fff;
+        .btn-cancel {
+            background: #03355C;
+            color: white;
+            border: 1px solid var(--border);
         }
 
-        .nav-link.active {
-            background: var(--accent-blue);
-            color: #fff;
+        .btn-logout-confirm {
+            background: #00AEFF;
+            color: white;
         }
 
-        .nav-link svg,
-        .logout-button svg {
-            flex-shrink: 0;
+        .btn-cancel:hover {
+            background: #03355ca1;
         }
 
-        .logout-form {
-            margin-top: auto;
+        .btn-logout-confirm:hover {
+            background: #008ecc;
         }
 
         .main-content {
@@ -385,86 +462,34 @@
         $initials = $initials !== '' ? $initials : 'C';
     @endphp
 
+    <!-- ================= SIDEBAR ================= -->
     <aside class="sidebar">
         <div class="logo">
-            <span class="logo-mark">
-                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" aria-hidden="true">
-                    <circle cx="12" cy="12" r="8.5" stroke="currentColor" stroke-width="1.8" />
-                    <circle cx="12" cy="12" r="3.2" fill="currentColor" stroke="none" />
-                </svg>
-            </span>
-            <span>GABAY</span>
+            <div class="logo-icon">
+                <img src="../images/GABAY_Logo.png" alt="GABAY Logo">
+            </div>
+            <span class="logo-text">GABAY</span>
         </div>
 
-        <div class="profile-section">
+        <div class="user-profile">
             <div class="avatar">{{ $initials }}</div>
-            <p class="profile-name">{{ $caregiver->name }}</p>
-            <p class="profile-role">Caregiver Account</p>
+            <h3>{{ $caregiver->name }}</h3>
+            <p>New York, USA</p>
         </div>
 
-        <ul class="nav-menu">
-            <li class="nav-item">
-                <a href="#dashboard" class="nav-link active">
-                    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" aria-hidden="true">
-                        <path d="M4 13h6v7H4zM14 4h6v16h-6zM4 4h6v5H4zM14 15h6v5h-6z" fill="currentColor" />
-                    </svg>
-                    <span>Dashboard</span>
-                </a>
-            </li>
-            <li class="nav-item">
-                <a href="#tracking" class="nav-link">
-                    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" aria-hidden="true">
-                        <path d="M12 21c4.97-4.54 8-8.15 8-11a8 8 0 1 0-16 0c0 2.85 3.03 6.46 8 11Z"
-                            stroke="currentColor" stroke-width="1.8" />
-                        <circle cx="12" cy="10" r="2.5" fill="currentColor" />
-                    </svg>
-                    <span>Tracking</span>
-                </a>
-            </li>
-            <li class="nav-item">
-                <a href="#reports" class="nav-link">
-                    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" aria-hidden="true">
-                        <path d="M7 3v18M17 8v13M12 12v9" stroke="currentColor" stroke-width="1.8"
-                            stroke-linecap="round" />
-                        <path d="M5 21h14" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" />
-                    </svg>
-                    <span>Reports</span>
-                </a>
-            </li>
-            <li class="nav-item">
-                <a href="#notifications" class="nav-link">
-                    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" aria-hidden="true">
-                        <path d="M6 9a6 6 0 0 1 12 0v4.5l1.5 2.5H4.5L6 13.5V9Z" stroke="currentColor" stroke-width="1.8"
-                            stroke-linejoin="round" />
-                        <path d="M10 19a2 2 0 0 0 4 0" stroke="currentColor" stroke-width="1.8"
-                            stroke-linecap="round" />
-                    </svg>
-                    <span>Notifications</span>
-                </a>
-            </li>
-            <li class="nav-item">
-                <a href="#profile" class="nav-link">
-                    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" aria-hidden="true">
-                        <circle cx="12" cy="8" r="4" stroke="currentColor" stroke-width="1.8" />
-                        <path d="M5 20a7 7 0 0 1 14 0" stroke="currentColor" stroke-width="1.8"
-                            stroke-linecap="round" />
-                    </svg>
-                    <span>Profile</span>
-                </a>
-            </li>
-        </ul>
+        <nav class="nav-menu">
+            <a href="dashboard.html"><i class="fa-solid fa-gauge"></i> Dashboard</a>
+            <a href="tracking.html"><i class="fa-solid fa-location-crosshairs"></i> Tracking</a>
+            <a href="reports.html"><i class="fa-solid fa-route"></i> Reports</a>
+            <a href="notification.html"><i class="fa-solid fa-bell"></i> Notifications</a>
+            <a href="profile.html" class="active"><i class="fa-solid fa-user"></i> Profile</a>
+        </nav>
 
         <form class="logout-form" method="POST" action="{{ route('logout') }}">
             @csrf
-            <button type="submit" class="logout-button">
-                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" aria-hidden="true">
-                    <path d="M15 17l5-5-5-5" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"
-                        stroke-linejoin="round" />
-                    <path d="M20 12H9" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" />
-                    <path d="M11 20H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h5" stroke="currentColor" stroke-width="1.8"
-                        stroke-linecap="round" />
-                </svg>
-                <span>Logout</span>
+            <button class="logout-btn" onclick="openModal()">
+                <i class="fa-solid fa-right-from-bracket"></i>
+                Logout
             </button>
         </form>
     </aside>
@@ -566,6 +591,43 @@
             </section>
         </div>
     </main>
+
+
+
+
+
+
+    <!-- LOGOUT MODAL -->
+    <div class="modal-overlay" id="logoutModal">
+        <div class="glass-card modal-content">
+            <i class="fa-solid fa-right-from-bracket modal-icon"></i>
+            <h2>Logout Account?</h2>
+            <p>Are you sure you want to logout your account?</p>
+
+            <div class="modal-buttons">
+                <button class="btn-cancel" onclick="closeModal()">Cancel</button>
+                <button class="btn-logout-confirm">Logout</button>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        const modal = document.getElementById('logoutModal');
+
+        function openModal() {
+            modal.style.display = 'flex';
+        }
+
+        function closeModal() {
+            modal.style.display = 'none';
+        }
+
+        window.onclick = function(event) {
+            if (event.target == modal) {
+                closeModal();
+            }
+        }
+    </script>
 </body>
 
 </html>
