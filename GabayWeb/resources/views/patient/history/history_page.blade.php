@@ -29,15 +29,20 @@
             background-color: var(--bg-dark);
             color: var(--text-main);
             display: flex;
-            min-height: 100vh;
+            height: 100vh;
+            overflow: hidden;
         }
 
         .sidebar {
             width: 280px;
+            flex: 0 0 280px;
+            height: 100vh;
+            min-height: 0;
             background: linear-gradient(180deg, #0d2640 0%, #06111a 100%);
             padding: 40px 24px;
             display: flex;
             flex-direction: column;
+            overflow-y: auto;
             border-right: 1px solid rgba(255, 255, 255, 0.05);
         }
 
@@ -127,6 +132,8 @@
 
         .main-content {
             flex-grow: 1;
+            min-width: 0;
+            height: 100vh;
             padding: 40px;
             overflow-y: auto;
         }
@@ -248,14 +255,21 @@
         @media (max-width: 900px) {
             body {
                 flex-direction: column;
+                height: auto;
+                min-height: 100vh;
+                overflow: auto;
             }
 
             .sidebar {
                 width: 100%;
+                flex: none;
+                height: auto;
                 padding: 24px 20px;
             }
 
             .main-content {
+                height: auto;
+                overflow: visible;
                 padding: 20px;
             }
 
