@@ -618,29 +618,38 @@
             visualizePitch: true,
         }), 'bottom-right');
 
-        function coordsToLngLat(coordinates) {
+        function normalizeCoordinate(coordinates) {
             if (!coordinates || typeof coordinates !== 'object') {
                 return null;
             }
 
-            const lng = Number(coordinates.lng);
-            const lat = Number(coordinates.lat);
+            const lng = Number(coordinates.lng ?? coordinates.longitude ?? coordinates[0]);
+            const lat = Number(coordinates.lat ?? coordinates.latitude ?? coordinates[1]);
 
             if (!Number.isFinite(lng) || !Number.isFinite(lat)) {
                 return null;
             }
 
-            return [lng, lat];
+            return {
+                lng,
+                lat,
+            };
+        }
+
+        function coordinateArray(coordinates) {
+            const point = normalizeCoordinate(coordinates);
+
+            return point ? [point.lng, point.lat] : null;
         }
 
         function formatCoords(coordinates) {
-            const lngLat = coordsToLngLat(coordinates);
+            const point = normalizeCoordinate(coordinates);
 
-            if (!lngLat) {
+            if (!point) {
                 return 'Coordinates not available.';
             }
 
-            return `${lngLat[1].toFixed(6)}, ${lngLat[0].toFixed(6)}`;
+            return `${point.lat.toFixed(6)}, ${point.lng.toFixed(6)}`;
         }
 
         function formatTime(value) {
@@ -699,8 +708,8 @@
                 return false;
             }
 
-            const current = coordsToLngLat(session.current_coordinates || session.origin_coordinates);
-            const destination = coordsToLngLat(session.destination_coordinates);
+            const current = normalizeCoordinate(session.current_coordinates || session.origin_coordinates);
+            const destination = normalizeCoordinate(session.destination_coordinates);
 
             if (current) {
                 if (!state.patientMarker) {
@@ -749,8 +758,8 @@
                 return;
             }
 
-            const current = coordsToLngLat(session.current_coordinates || session.origin_coordinates);
-            const destination = coordsToLngLat(session.destination_coordinates);
+            const current = normalizeCoordinate(session.current_coordinates || session.origin_coordinates);
+            const destination = normalizeCoordinate(session.destination_coordinates);
 
             if (!current || !destination) {
                 state.lastRouteKey = '';
@@ -763,7 +772,9 @@
                 return;
             }
 
-            const routeKey = `${current.join(',')};${destination.join(',')}`;
+            const currentArray = coordinateArray(current);
+            const destinationArray = coordinateArray(destination);
+            const routeKey = `${currentArray.join(',')};${destinationArray.join(',')}`;
             if (routeKey === state.lastRouteKey) {
                 return;
             }
@@ -771,10 +782,10 @@
             state.lastRouteKey = routeKey;
             const params = new URLSearchParams({
                 profile: 'walking',
-                start_lng: current[0],
-                start_lat: current[1],
-                end_lng: destination[0],
-                end_lat: destination[1],
+                start_lng: current.lng,
+                start_lat: current.lat,
+                end_lng: destination.lng,
+                end_lat: destination.lat,
             });
 
             const response = await fetch(`${routes.directions}?${params.toString()}`, {
