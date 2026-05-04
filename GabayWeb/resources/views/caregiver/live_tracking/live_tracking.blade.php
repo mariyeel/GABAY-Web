@@ -129,10 +129,18 @@
         }
 
         .nav-link:hover,
-        .logout-button:hover,
+        .logout-button:hover {
+            background: rgba(255, 255, 255, 0.05);
+            color: #fff;
+        }
+
         .nav-link.active {
             background: var(--blue);
             color: #fff;
+        }
+
+        .logout-form {
+            margin-top: auto;
         }
 
         .main-content {
@@ -414,7 +422,7 @@
             <span class="logo-mark">
                 <svg width="18" height="18" viewBox="0 0 24 24" fill="none" aria-hidden="true">
                     <circle cx="12" cy="12" r="8.5" stroke="currentColor" stroke-width="1.8" />
-                    <circle cx="12" cy="12" r="3.2" fill="currentColor" />
+                    <circle cx="12" cy="12" r="3.2" fill="currentColor" stroke="none" />
                 </svg>
             </span>
             <span>GABAY</span>
@@ -445,9 +453,40 @@
                     <span>Tracking</span>
                 </a>
             </li>
+            <li class="nav-item">
+                <a href="{{ route('dashboard.caregiver') }}#reports" class="nav-link">
+                    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+                        <path d="M7 3v18M17 8v13M12 12v9" stroke="currentColor" stroke-width="1.8"
+                            stroke-linecap="round" />
+                        <path d="M5 21h14" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" />
+                    </svg>
+                    <span>Reports</span>
+                </a>
+            </li>
+            <li class="nav-item">
+                <a href="{{ route('dashboard.caregiver') }}#notifications" class="nav-link">
+                    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+                        <path d="M6 9a6 6 0 0 1 12 0v4.5l1.5 2.5H4.5L6 13.5V9Z" stroke="currentColor"
+                            stroke-width="1.8" stroke-linejoin="round" />
+                        <path d="M10 19a2 2 0 0 0 4 0" stroke="currentColor" stroke-width="1.8"
+                            stroke-linecap="round" />
+                    </svg>
+                    <span>Notifications</span>
+                </a>
+            </li>
+            <li class="nav-item">
+                <a href="{{ route('dashboard.caregiver') }}#profile" class="nav-link">
+                    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+                        <circle cx="12" cy="8" r="4" stroke="currentColor" stroke-width="1.8" />
+                        <path d="M5 20a7 7 0 0 1 14 0" stroke="currentColor" stroke-width="1.8"
+                            stroke-linecap="round" />
+                    </svg>
+                    <span>Profile</span>
+                </a>
+            </li>
         </ul>
 
-        <form method="POST" action="{{ route('logout') }}">
+        <form class="logout-form" method="POST" action="{{ route('logout') }}">
             @csrf
             <button type="submit" class="logout-button">
                 <svg width="18" height="18" viewBox="0 0 24 24" fill="none" aria-hidden="true">
