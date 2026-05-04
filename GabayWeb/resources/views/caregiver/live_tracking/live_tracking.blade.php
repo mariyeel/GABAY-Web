@@ -466,8 +466,8 @@
             <li class="nav-item">
                 <a href="{{ route('dashboard.caregiver') }}#notifications" class="nav-link">
                     <svg width="18" height="18" viewBox="0 0 24 24" fill="none" aria-hidden="true">
-                        <path d="M6 9a6 6 0 0 1 12 0v4.5l1.5 2.5H4.5L6 13.5V9Z" stroke="currentColor"
-                            stroke-width="1.8" stroke-linejoin="round" />
+                        <path d="M6 9a6 6 0 0 1 12 0v4.5l1.5 2.5H4.5L6 13.5V9Z" stroke="currentColor" stroke-width="1.8"
+                            stroke-linejoin="round" />
                         <path d="M10 19a2 2 0 0 0 4 0" stroke="currentColor" stroke-width="1.8"
                             stroke-linecap="round" />
                     </svg>
@@ -789,9 +789,10 @@
 
             state.lastSessionId = session.id;
             setStatusPill(session.status);
-            elements.sessionMeta.textContent = `Session #${session.id} started ${formatTime(session.start_time)}`;
+            elements.sessionMeta.textContent = `Started ${formatTime(session.start_time)}`;
             elements.lastUpdate.textContent = `Last GPS update: ${formatTime(session.location_updated_at)}`;
-            elements.originText.textContent = `${session.origin || 'Origin not recorded'} (${formatCoords(session.origin_coordinates)})`;
+            elements.originText.textContent =
+                `${session.origin || 'Origin not recorded'} (${formatCoords(session.origin_coordinates)})`;
             elements.currentText.textContent = formatCoords(session.current_coordinates);
             elements.destinationText.textContent =
                 `${session.destination || 'Destination not recorded'} (${formatCoords(session.destination_coordinates)})`;
