@@ -619,19 +619,28 @@
         }), 'bottom-right');
 
         function coordsToLngLat(coordinates) {
-            if (!coordinates) {
+            if (!coordinates || typeof coordinates !== 'object') {
                 return null;
             }
 
-            return [Number(coordinates.lng), Number(coordinates.lat)];
+            const lng = Number(coordinates.lng);
+            const lat = Number(coordinates.lat);
+
+            if (!Number.isFinite(lng) || !Number.isFinite(lat)) {
+                return null;
+            }
+
+            return [lng, lat];
         }
 
         function formatCoords(coordinates) {
-            if (!coordinates) {
+            const lngLat = coordsToLngLat(coordinates);
+
+            if (!lngLat) {
                 return 'Coordinates not available.';
             }
 
-            return `${Number(coordinates.lat).toFixed(6)}, ${Number(coordinates.lng).toFixed(6)}`;
+            return `${lngLat[1].toFixed(6)}, ${lngLat[0].toFixed(6)}`;
         }
 
         function formatTime(value) {
@@ -686,6 +695,10 @@
         }
 
         function setMarkers(session) {
+            if (!session) {
+                return false;
+            }
+
             const current = coordsToLngLat(session.current_coordinates || session.origin_coordinates);
             const destination = coordsToLngLat(session.destination_coordinates);
 
@@ -727,13 +740,26 @@
                     duration: 800,
                 });
             }
+
+            return Boolean(current || destination);
         }
 
         async function drawRoute(session) {
+            if (!session) {
+                return;
+            }
+
             const current = coordsToLngLat(session.current_coordinates || session.origin_coordinates);
             const destination = coordsToLngLat(session.destination_coordinates);
 
             if (!current || !destination) {
+                state.lastRouteKey = '';
+                if (map.getSource('patient-route')) {
+                    map.getSource('patient-route').setData({
+                        type: 'FeatureCollection',
+                        features: [],
+                    });
+                }
                 return;
             }
 
@@ -800,7 +826,12 @@
                 'Monitoring live patient movement.' :
                 `Showing latest ${session.status} session.`;
 
-            setMarkers(session);
+            const hasAnyMarker = setMarkers(session);
+            if (!hasAnyMarker) {
+                elements.mapStatus.textContent = 'Waiting for valid patient coordinates.';
+                return;
+            }
+
             drawRoute(session).catch(error => {
                 console.error(error);
                 elements.mapStatus.textContent = error.message || 'Unable to draw patient route.';
