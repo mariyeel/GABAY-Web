@@ -19,6 +19,9 @@ Route::post('/login', [UserController::class, 'authenticate'])->name('login.stor
 Route::post('/logout', [UserController::class, 'logout'])->name('logout');
 Route::get('/caregiver/dashboard', [UserController::class, 'caregiverDashboard'])->name('dashboard.caregiver');
 Route::post('/caregiver/connect', [UserController::class, 'connectPatient'])->name('caregiver.connect');
+Route::get('/caregiver/live-tracking', [UserController::class, 'caregiverLiveTracking'])->name('caregiver.live_tracking');
+Route::get('/caregiver/live-tracking/session', [UserController::class, 'caregiverLiveTrackingSession'])->name('caregiver.live_tracking.session');
+Route::get('/caregiver/live-tracking/mapbox/directions', [UserController::class, 'caregiverMapboxDirections'])->name('caregiver.live_tracking.mapbox.directions');
 Route::get('/patient/dashboard', [UserController::class, 'patientDashboard'])->name('dashboard.patient');
 Route::get('/patient/navigation', [UserController::class, 'patientNavigation'])->name('patient.navigation');
 Route::get('/patient/navigation/mapbox/reverse-geocode', [UserController::class, 'mapboxReverseGeocode'])->name('patient.navigation.mapbox.reverse');
@@ -27,3 +30,4 @@ Route::get('/patient/navigation/mapbox/directions', [UserController::class, 'map
 Route::get('/patient/history', [UserController::class, 'patientHistory'])->name('patient.history');
 Route::post('/patient/navigation/session', [UserController::class, 'startNavigationSession'])->name('patient.navigation.session.start');
 Route::patch('/patient/navigation/session/{navigationSession}', [UserController::class, 'completeNavigationSession'])->name('patient.navigation.session.update');
+Route::patch('/patient/navigation/session/{navigationSession}/location', [UserController::class, 'updateNavigationSessionLocation'])->name('patient.navigation.session.location');

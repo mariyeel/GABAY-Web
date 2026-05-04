@@ -736,6 +736,7 @@
             suggestionResults: [],
             suggestionTimeoutId: null,
             navigationSessionId: null,
+            lastLocationSyncAt: 0,
         };
 
         const NAVIGATION_MANEUVER_THRESHOLD_METERS = 30;
@@ -959,19 +960,48 @@
         }
 
         async function startNavigationSessionRecord() {
-            if (!state.currentPlaceLabel || !state.destinationFeature?.place_name) {
+            if (!state.currentPlaceLabel || !state.currentCoordinates || !state.destinationFeature?.place_name || !state
+                .destinationFeature?.center) {
                 return;
             }
 
+            const [originLng, originLat] = state.currentCoordinates;
+            const [destinationLng, destinationLat] = state.destinationFeature.center;
             const data = await sendNavigationSessionRequest(
                 `{{ route('patient.navigation.session.start', [], false) }}`,
                 'POST', {
                     origin: state.currentPlaceLabel,
+                    origin_latitude: originLat,
+                    origin_longitude: originLng,
                     destination: state.destinationFeature.place_name,
+                    destination_latitude: destinationLat,
+                    destination_longitude: destinationLng,
                 }
             );
 
             state.navigationSessionId = data.data?.id || null;
+        }
+
+        async function syncNavigationSessionLocation(force = false) {
+            if (!state.navigationSessionId || !state.currentCoordinates) {
+                return;
+            }
+
+            const now = Date.now();
+            if (!force && now - state.lastLocationSyncAt < 5000) {
+                return;
+            }
+
+            state.lastLocationSyncAt = now;
+            const [currentLng, currentLat] = state.currentCoordinates;
+
+            await sendNavigationSessionRequest(
+                `/patient/navigation/session/${state.navigationSessionId}/location`,
+                'PATCH', {
+                    current_latitude: currentLat,
+                    current_longitude: currentLng,
+                }
+            );
         }
 
         async function updateNavigationSessionRecord(status) {
@@ -979,11 +1009,14 @@
                 return;
             }
 
+            const [currentLng, currentLat] = state.currentCoordinates || [];
             await sendNavigationSessionRequest(
                 `/patient/navigation/session/${state.navigationSessionId}`,
                 'PATCH', {
                     status,
                     destination: state.destinationFeature?.place_name || destinationInput.value.trim(),
+                    current_latitude: currentLat,
+                    current_longitude: currentLng,
                 }
             );
 
@@ -1076,6 +1109,7 @@
                 const coords = [position.coords.longitude, position.coords.latitude];
                 state.currentCoordinates = coords;
                 setCurrentMarker(coords);
+                syncNavigationSessionLocation().catch(error => console.error(error));
                 handleNavigationProgress();
             }, error => {
                 console.error(error);

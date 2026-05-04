@@ -2,6 +2,8 @@
 
 namespace Tests\Feature;
 
+use App\Models\NavigationSession;
+use App\Models\Pairing;
 use App\Models\User;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Tests\TestCase;
@@ -64,5 +66,57 @@ class CaregiverPairingTest extends TestCase
         $response->assertSessionHasErrors('pairing_code');
 
         $this->assertDatabaseCount('pairings', 0);
+    }
+
+    public function test_caregiver_can_view_live_tracking_session_for_connected_patient(): void
+    {
+        $patient = User::create([
+            'name' => 'Patient One',
+            'email' => 'patient-live@example.com',
+            'password' => 'password123',
+            'role' => 'vi',
+            'pairing_code' => 'ABC123',
+            'code_expires_at' => now()->addDays(7),
+        ]);
+
+        $caregiver = User::create([
+            'name' => 'Caregiver One',
+            'email' => 'caregiver-live@example.com',
+            'password' => 'password123',
+            'role' => 'caregiver',
+            'pairing_code' => null,
+            'code_expires_at' => null,
+        ]);
+
+        Pairing::create([
+            'vi_user_id' => $patient->user_id,
+            'caregiver_user_id' => $caregiver->user_id,
+            'status' => 'active',
+            'paired_at' => now(),
+        ]);
+
+        $session = NavigationSession::create([
+            'user_id' => $patient->user_id,
+            'origin' => 'Current Street, Davao City',
+            'origin_latitude' => 7.0731,
+            'origin_longitude' => 125.6115,
+            'destination' => 'Peoples Park, Davao City',
+            'destination_latitude' => 7.0707,
+            'destination_longitude' => 125.6087,
+            'current_latitude' => 7.0742,
+            'current_longitude' => 125.6128,
+            'location_updated_at' => now(),
+            'start_time' => now(),
+            'status' => 'ongoing',
+        ]);
+
+        $pageResponse = $this->actingAs($caregiver)->get('/caregiver/live-tracking');
+        $pageResponse->assertOk();
+        $pageResponse->assertSee('Patient live tracking');
+
+        $apiResponse = $this->actingAs($caregiver)->getJson('/caregiver/live-tracking/session');
+        $apiResponse->assertOk();
+        $apiResponse->assertJsonPath('data.session.id', $session->id);
+        $apiResponse->assertJsonPath('data.session.current_coordinates.lat', 7.0742);
     }
 }

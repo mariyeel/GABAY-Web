@@ -3,6 +3,28 @@
 use Illuminate\Support\Str;
 use Pdo\Mysql;
 
+$envValue = static function (string $key, mixed $default = null): mixed {
+    $value = env($key, $default);
+
+    if (!is_string($value)) {
+        return $value;
+    }
+
+    $trimmed = trim($value);
+
+    if ($trimmed === '' || str_starts_with($trimmed, '${{')) {
+        return $default;
+    }
+
+    return $trimmed;
+};
+
+$mysqlHost = $envValue('DB_HOST') ?? $envValue('MYSQLHOST', '127.0.0.1');
+$mysqlPort = $envValue('DB_PORT') ?? $envValue('MYSQLPORT', '3306');
+$mysqlDatabase = $envValue('DB_DATABASE') ?? $envValue('MYSQLDATABASE', 'laravel');
+$mysqlUsername = $envValue('DB_USERNAME') ?? $envValue('MYSQLUSER', 'root');
+$mysqlPassword = $envValue('DB_PASSWORD') ?? $envValue('MYSQLPASSWORD', '');
+
 return [
 
     /*
@@ -47,11 +69,11 @@ return [
         'mysql' => [
             'driver' => 'mysql',
             'url' => env('DB_URL'),
-            'host' => env('DB_HOST', '127.0.0.1'),
-            'port' => env('DB_PORT', '3306'),
-            'database' => env('DB_DATABASE', 'laravel'),
-            'username' => env('DB_USERNAME', 'root'),
-            'password' => env('DB_PASSWORD', ''),
+            'host' => $mysqlHost,
+            'port' => $mysqlPort,
+            'database' => $mysqlDatabase,
+            'username' => $mysqlUsername,
+            'password' => $mysqlPassword,
             'unix_socket' => env('DB_SOCKET', ''),
             'charset' => env('DB_CHARSET', 'utf8mb4'),
             'collation' => env('DB_COLLATION', 'utf8mb4_unicode_ci'),
