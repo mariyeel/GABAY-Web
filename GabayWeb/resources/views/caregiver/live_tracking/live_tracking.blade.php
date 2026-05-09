@@ -300,6 +300,7 @@
         #caregiver-map {
             position: absolute;
             inset: 0;
+            background: #081722;
         }
 
         .map-overlay {
@@ -614,6 +615,12 @@
             zoom: 13,
         });
 
+        map.on('error', event => {
+            const message = event?.error?.message || 'Mapbox could not render the map.';
+            console.error(event?.error || event);
+            elements.mapStatus.textContent = message;
+        });
+
         map.addControl(new mapboxgl.NavigationControl({
             visualizePitch: true,
         }), 'bottom-right');
@@ -703,6 +710,19 @@
             return element;
         }
 
+        function focusPatientLocation(coordinates) {
+            if (!coordinates) {
+                return;
+            }
+
+            map.easeTo({
+                center: coordinates,
+                zoom: Math.max(map.getZoom(), 16),
+                duration: 900,
+                essential: true,
+            });
+        }
+
         function setMarkers(session) {
             if (!session) {
                 return false;
@@ -710,18 +730,20 @@
 
             const current = normalizeCoordinate(session.current_coordinates || session.origin_coordinates);
             const destination = normalizeCoordinate(session.destination_coordinates);
+            const currentArray = coordinateArray(current);
+            const destinationArray = coordinateArray(destination);
 
-            if (current) {
+            if (currentArray) {
                 if (!state.patientMarker) {
                     state.patientMarker = new mapboxgl.Marker({
                         element: markerElement('patient-marker'),
                     }).addTo(map);
                 }
 
-                state.patientMarker.setLngLat(current);
+                state.patientMarker.setLngLat(currentArray);
             }
 
-            if (destination) {
+            if (destinationArray) {
                 if (!state.destinationMarker) {
                     state.destinationMarker = new mapboxgl.Marker({
                         element: markerElement('destination-marker'),
@@ -729,28 +751,24 @@
                 }
 
                 state.destinationMarker
-                    .setLngLat(destination)
+                    .setLngLat(destinationArray)
                     .setPopup(new mapboxgl.Popup({
                         offset: 20,
                     }).setHTML(`<strong>Destination</strong><br>${session.destination || ''}`));
             }
 
-            if (current && destination) {
-                const bounds = new mapboxgl.LngLatBounds(current, current).extend(destination);
-                map.fitBounds(bounds, {
-                    padding: 90,
-                    maxZoom: 16,
-                    duration: 800,
-                });
-            } else if (current) {
+            if (currentArray) {
+                focusPatientLocation(currentArray);
+            } else if (destinationArray) {
                 map.flyTo({
-                    center: current,
+                    center: destinationArray,
                     zoom: 15,
                     duration: 800,
+                    essential: true,
                 });
             }
 
-            return Boolean(current || destination);
+            return Boolean(currentArray || destinationArray);
         }
 
         async function drawRoute(session) {
@@ -873,6 +891,7 @@
         elements.refreshButton.addEventListener('click', loadTrackingData);
 
         map.on('load', () => {
+            requestAnimationFrame(() => map.resize());
             ensureRouteLayer();
 
             if (initialTrackingData) {

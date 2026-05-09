@@ -124,6 +124,17 @@
             color: white;
         }
 
+        .logout-form {
+            margin-top: auto;
+        }
+
+        .logout-button {
+            width: 100%;
+            border: 0;
+            background: transparent;
+            text-align: left;
+        }
+
         .main-content {
             flex-grow: 1;
             min-width: 0;
@@ -350,16 +361,20 @@
             </li>
         </ul>
 
-        <div class="nav-item" style="margin-top: auto;">
-            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" aria-hidden="true">
-                <path d="M15 17l5-5-5-5" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"
-                    stroke-linejoin="round" />
-                <path d="M20 12H9" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" />
-                <path d="M11 20H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h5" stroke="currentColor" stroke-width="1.8"
-                    stroke-linecap="round" />
-            </svg>
-            <span>Logout</span>
-        </div>
+        <form class="logout-form" method="POST" action="{{ route('logout') }}"
+            onsubmit="return confirm('Are you sure you want to log out?');">
+            @csrf
+            <button type="submit" class="nav-item logout-button">
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+                    <path d="M15 17l5-5-5-5" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"
+                        stroke-linejoin="round" />
+                    <path d="M20 12H9" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" />
+                    <path d="M11 20H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h5" stroke="currentColor" stroke-width="1.8"
+                        stroke-linecap="round" />
+                </svg>
+                <span>Logout</span>
+            </button>
+        </form>
     </aside>
 
     <main class="main-content">

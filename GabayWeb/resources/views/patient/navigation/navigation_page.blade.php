@@ -737,9 +737,17 @@
             suggestionTimeoutId: null,
             navigationSessionId: null,
             lastLocationSyncAt: 0,
+            liveSyncIntervalId: null,
+            lastKnownAccuracy: null,
         };
 
         const NAVIGATION_MANEUVER_THRESHOLD_METERS = 30;
+        const LOCATION_SYNC_INTERVAL_MS = 3000;
+        const GEOLOCATION_OPTIONS = {
+            enableHighAccuracy: true,
+            timeout: 20000,
+            maximumAge: 0,
+        };
 
         if (!mapboxgl.accessToken) {
             setStatus('Mapbox is not configured. Please add MAPBOX_TOKEN to the server environment variables.');
@@ -759,6 +767,30 @@
         function setStatus(message) {
             routeStatus.textContent = message;
             mapStatus.textContent = message;
+        }
+
+        function formatAccuracy(accuracy) {
+            return Number.isFinite(accuracy) ? `Accuracy about ${Math.round(accuracy)} m.` : 'Accuracy unavailable.';
+        }
+
+        function geolocationErrorMessage(error) {
+            if (error?.message) {
+                return error.message;
+            }
+
+            if (error?.code === 1) {
+                return 'Location permission was denied. Allow location access on the patient phone.';
+            }
+
+            if (error?.code === 2) {
+                return 'The phone could not determine its current location. Turn on GPS/location services and try again.';
+            }
+
+            if (error?.code === 3) {
+                return 'Location detection timed out. Move near a window or open area, then refresh location.';
+            }
+
+            return 'Location is unavailable. Please check phone location settings.';
         }
 
         async function fetchNavigationJson(url) {
@@ -909,6 +941,11 @@
                 state.watchId = null;
             }
 
+            if (state.liveSyncIntervalId !== null) {
+                window.clearInterval(state.liveSyncIntervalId);
+                state.liveSyncIntervalId = null;
+            }
+
             if ('speechSynthesis' in window) {
                 window.speechSynthesis.cancel();
             }
@@ -947,6 +984,7 @@
                     'Accept': 'application/json',
                     'X-CSRF-TOKEN': csrfToken,
                 },
+                credentials: 'same-origin',
                 body: JSON.stringify(payload),
             });
 
@@ -988,7 +1026,7 @@
             }
 
             const now = Date.now();
-            if (!force && now - state.lastLocationSyncAt < 5000) {
+            if (!force && now - state.lastLocationSyncAt < LOCATION_SYNC_INTERVAL_MS) {
                 return;
             }
 
@@ -1002,6 +1040,43 @@
                     current_longitude: currentLng,
                 }
             );
+        }
+
+        function applyPhonePosition(position, options = {}) {
+            const coords = [position.coords.longitude, position.coords.latitude];
+            state.currentCoordinates = coords;
+            state.lastKnownAccuracy = position.coords.accuracy;
+            setCurrentMarker(coords);
+
+            if (options.recenter) {
+                map.flyTo({
+                    center: coords,
+                    zoom: 15,
+                    duration: 800,
+                });
+            }
+
+            if (state.navigationStarted) {
+                syncNavigationSessionLocation(options.forceSync).catch(error => console.error(error));
+                handleNavigationProgress();
+                setStatus(`Live tracking active. ${formatAccuracy(state.lastKnownAccuracy)}`);
+            }
+
+            return coords;
+        }
+
+        function getFreshPhonePosition() {
+            if (!navigator.geolocation) {
+                return Promise.reject(new Error('This browser does not support geolocation.'));
+            }
+
+            if (!window.isSecureContext) {
+                return Promise.reject(new Error('Open Gabay over HTTPS on the patient phone so the browser can use precise GPS.'));
+            }
+
+            return new Promise((resolve, reject) => {
+                navigator.geolocation.getCurrentPosition(resolve, reject, GEOLOCATION_OPTIONS);
+            });
         }
 
         async function updateNavigationSessionRecord(status) {
@@ -1106,19 +1181,19 @@
             }
 
             state.watchId = navigator.geolocation.watchPosition(position => {
-                const coords = [position.coords.longitude, position.coords.latitude];
-                state.currentCoordinates = coords;
-                setCurrentMarker(coords);
-                syncNavigationSessionLocation().catch(error => console.error(error));
-                handleNavigationProgress();
+                applyPhonePosition(position);
             }, error => {
                 console.error(error);
-                setStatus('Live tracking was interrupted. Please allow location access and try again.');
-            }, {
-                enableHighAccuracy: true,
-                timeout: 10000,
-                maximumAge: 2000,
-            });
+                setStatus(geolocationErrorMessage(error));
+            }, GEOLOCATION_OPTIONS);
+
+            if (state.liveSyncIntervalId !== null) {
+                window.clearInterval(state.liveSyncIntervalId);
+            }
+
+            state.liveSyncIntervalId = window.setInterval(() => {
+                syncNavigationSessionLocation(true).catch(error => console.error(error));
+            }, 5000);
         }
 
         async function startNavigationGuidance(route, profile) {
@@ -1139,6 +1214,11 @@
             }
 
             await startNavigationSessionRecord();
+            if (!state.navigationSessionId) {
+                throw new Error('Navigation session could not be started. Please try again.');
+            }
+
+            await syncNavigationSessionLocation(true);
             startLiveTracking();
             announceCurrentStep();
         }
@@ -1386,20 +1466,16 @@
 
             setStatus('Detecting your current location...');
 
-            navigator.geolocation.getCurrentPosition(async position => {
-                const coords = [position.coords.longitude, position.coords.latitude];
-                state.currentCoordinates = coords;
+            try {
+                const position = await getFreshPhonePosition();
+                const coords = applyPhonePosition(position, {
+                    recenter: true,
+                });
                 state.previewRoute = null;
                 state.previewProfile = null;
                 if (!state.navigationStarted) {
                     state.destinationFeature = null;
                 }
-                setCurrentMarker(coords);
-                map.flyTo({
-                    center: coords,
-                    zoom: 15,
-                    essential: true
-                });
 
                 try {
                     const label = await reverseGeocode(coords);
@@ -1409,16 +1485,12 @@
                     currentLocationInput.value = `${coords[1].toFixed(5)}, ${coords[0].toFixed(5)}`;
                 }
 
-                setStatus('Current location is ready. Enter a destination to build the route.');
-            }, error => {
+                setStatus(`Current location is ready. ${formatAccuracy(state.lastKnownAccuracy)} Enter a destination to build the route.`);
+            } catch (error) {
                 console.error(error);
                 currentLocationInput.value = 'Permission denied or location unavailable';
-                setStatus('Location access was denied. Allow GPS access to use navigation.');
-            }, {
-                enableHighAccuracy: true,
-                timeout: 10000,
-                maximumAge: 5000,
-            });
+                setStatus(geolocationErrorMessage(error));
+            }
         }
 
         async function resolveDestinationFeature() {
@@ -1473,9 +1545,22 @@
             }
 
             setActionState(true, 'start');
-            setStatus('Preparing turn-by-turn directions...');
+            setStatus('Refreshing phone GPS before starting...');
 
             try {
+                const position = await getFreshPhonePosition();
+                applyPhonePosition(position, {
+                    recenter: true,
+                });
+                state.previewRoute = null;
+                state.previewProfile = null;
+
+                if (!state.currentPlaceLabel) {
+                    state.currentPlaceLabel =
+                        `Current location (${state.currentCoordinates[1].toFixed(5)}, ${state.currentCoordinates[0].toFixed(5)})`;
+                }
+
+                setStatus('Preparing turn-by-turn directions...');
                 const destination = await resolveDestinationFeature();
                 const hasPreviewForDestination = state.previewRoute && state.destinationFeature &&
                     state.destinationFeature.place_name === destination.place_name;
