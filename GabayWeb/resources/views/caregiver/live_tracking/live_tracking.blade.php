@@ -715,12 +715,13 @@
                 return;
             }
 
-            map.easeTo({
+            map.resize();
+            map.jumpTo({
                 center: coordinates,
-                zoom: Math.max(map.getZoom(), 16),
-                duration: 900,
-                essential: true,
+                zoom: 17,
             });
+            elements.mapStatus.textContent =
+                `Following patient at ${coordinates[1].toFixed(6)}, ${coordinates[0].toFixed(6)}.`;
         }
 
         function setMarkers(session) {
