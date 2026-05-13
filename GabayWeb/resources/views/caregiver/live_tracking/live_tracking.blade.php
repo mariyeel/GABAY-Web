@@ -9,6 +9,9 @@
     <link href="https://fonts.googleapis.com/css2?family=Poppins:wght@300;400;500;600;700&display=swap" rel="stylesheet">
     <link href="https://api.mapbox.com/mapbox-gl-js/v2.15.0/mapbox-gl.css" rel="stylesheet">
     <script src="https://api.mapbox.com/mapbox-gl-js/v2.15.0/mapbox-gl.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/10.12.5/firebase-app-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/10.12.5/firebase-auth-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/10.12.5/firebase-database-compat.js"></script>
     <style>
         :root {
             --bg: #07131d;
@@ -579,6 +582,7 @@
 
         const routes = {
             session: @json(route('caregiver.live_tracking.session', [], false)),
+            firebaseAuth: @json(route('caregiver.live_tracking.firebase_auth', [], false)),
             directions: @json(route('caregiver.live_tracking.mapbox.directions', [], false)),
         };
 
@@ -591,6 +595,7 @@
             currentText: document.getElementById('current-text'),
             destinationText: document.getElementById('destination-text'),
             mapStatus: document.getElementById('map-status'),
+            pollingStatus: document.getElementById('polling-status'),
             refreshButton: document.getElementById('refresh-tracking'),
         };
 
@@ -600,6 +605,13 @@
             routeLoaded: false,
             lastSessionId: null,
             lastRouteKey: '',
+            lastRouteDrawAt: 0,
+            firebaseRef: null,
+            firebaseCallback: null,
+            firebaseReady: false,
+            pollingIntervalId: null,
+            latestSession: initialTrackingData?.session || null,
+            latestPatient: initialTrackingData?.patient || null,
         };
 
         if (!mapboxgl.accessToken) {
@@ -634,6 +646,10 @@
             const lat = Number(coordinates.lat ?? coordinates.latitude ?? coordinates[1]);
 
             if (!Number.isFinite(lng) || !Number.isFinite(lat)) {
+                return null;
+            }
+
+            if (lat < -90 || lat > 90 || lng < -180 || lng > 180) {
                 return null;
             }
 
@@ -793,12 +809,16 @@
 
             const currentArray = coordinateArray(current);
             const destinationArray = coordinateArray(destination);
-            const routeKey = `${currentArray.join(',')};${destinationArray.join(',')}`;
-            if (routeKey === state.lastRouteKey) {
+            const roundedCurrent = currentArray.map(value => Number(value).toFixed(4)).join(',');
+            const roundedDestination = destinationArray.map(value => Number(value).toFixed(4)).join(',');
+            const routeKey = `${roundedCurrent};${roundedDestination}`;
+            const routeThrottleActive = Date.now() - state.lastRouteDrawAt < 30000;
+            if (routeKey === state.lastRouteKey || routeThrottleActive) {
                 return;
             }
 
             state.lastRouteKey = routeKey;
+            state.lastRouteDrawAt = Date.now();
             const params = new URLSearchParams({
                 profile: 'walking',
                 start_lng: current.lng,
@@ -830,6 +850,14 @@
         function renderTrackingData(data) {
             const patient = data?.patient;
             const session = data?.session;
+
+            if (patient) {
+                state.latestPatient = patient;
+            }
+
+            if (session) {
+                state.latestSession = session;
+            }
 
             if (patient?.name) {
                 elements.patientName.textContent = patient.name;
@@ -868,6 +896,105 @@
             });
         }
 
+        function mergeFirebaseLocation(location) {
+            if (!location || typeof location !== 'object') {
+                return;
+            }
+
+            const point = normalizeCoordinate(location);
+            if (!point) {
+                elements.mapStatus.textContent = 'Received invalid GPS coordinates from Firebase.';
+                return;
+            }
+
+            const baseSession = state.latestSession || {};
+            const session = {
+                ...baseSession,
+                id: location.navigation_session_id || baseSession.id || null,
+                status: location.session_status || baseSession.status || 'ongoing',
+                location_updated_at: location.updated_at || new Date(Number(location.updated_at_ms || Date.now())).toISOString(),
+                current_coordinates: {
+                    lat: point.lat,
+                    lng: point.lng,
+                },
+            };
+
+            renderTrackingData({
+                patient: state.latestPatient,
+                session,
+            });
+
+            elements.pollingStatus.textContent =
+                location.connection_state === 'offline' ? 'Firebase connected - patient offline' : 'Firebase live listener active';
+            elements.lastUpdate.textContent =
+                `Last GPS update: ${formatTime(session.location_updated_at)}${Number.isFinite(Number(location.accuracy)) ? ` (${Math.round(Number(location.accuracy))}m accuracy)` : ''}`;
+        }
+
+        async function fetchJson(url) {
+            const response = await fetch(url, {
+                headers: {
+                    'Accept': 'application/json',
+                },
+                credentials: 'same-origin',
+            });
+            const payload = await response.json().catch(() => ({}));
+
+            if (!response.ok) {
+                throw new Error(payload.message || 'Unable to start Firebase live tracking.');
+            }
+
+            return payload;
+        }
+
+        async function startFirebaseListener() {
+            if (state.firebaseReady || state.firebaseRef) {
+                return true;
+            }
+
+            if (!window.firebase?.initializeApp) {
+                throw new Error('Firebase scripts did not load.');
+            }
+
+            const payload = await fetchJson(routes.firebaseAuth);
+            const data = payload.data || {};
+
+            if (!firebase.apps.length) {
+                firebase.initializeApp(data.config);
+            }
+
+            await firebase.auth().signInWithCustomToken(data.token);
+            state.firebaseRef = firebase.database().ref(data.live_location_path);
+            state.firebaseCallback = snapshot => mergeFirebaseLocation(snapshot.val());
+            state.firebaseRef.on('value', state.firebaseCallback, error => {
+                console.error(error);
+                elements.mapStatus.textContent = error.message || 'Firebase live tracking listener failed.';
+                startPollingFallback();
+            });
+            state.firebaseReady = true;
+            elements.pollingStatus.textContent = 'Firebase live listener active';
+            return true;
+        }
+
+        function startPollingFallback() {
+            if (state.pollingIntervalId !== null) {
+                return;
+            }
+
+            elements.pollingStatus.textContent = 'Firebase unavailable - fallback refresh every 5 seconds';
+            state.pollingIntervalId = window.setInterval(loadTrackingData, 5000);
+        }
+
+        function cleanupLiveTracking() {
+            if (state.firebaseRef && state.firebaseCallback) {
+                state.firebaseRef.off('value', state.firebaseCallback);
+            }
+
+            if (state.pollingIntervalId !== null) {
+                window.clearInterval(state.pollingIntervalId);
+                state.pollingIntervalId = null;
+            }
+        }
+
         async function loadTrackingData() {
             try {
                 const response = await fetch(routes.session, {
@@ -901,8 +1028,14 @@
                 loadTrackingData();
             }
 
-            window.setInterval(loadTrackingData, 5000);
+            startFirebaseListener().catch(error => {
+                console.error(error);
+                elements.mapStatus.textContent = error.message || 'Firebase unavailable, using refresh fallback.';
+                startPollingFallback();
+            });
         });
+
+        window.addEventListener('pagehide', cleanupLiveTracking);
     </script>
 </body>
 

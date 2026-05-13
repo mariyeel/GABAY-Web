@@ -5,9 +5,11 @@ namespace App\Http\Controllers;
 use App\Models\NavigationSession;
 use App\Models\Pairing;
 use App\Models\User;
+use App\Services\FirebaseService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
+use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Str;
 use Illuminate\Validation\Rules\Password;
@@ -111,6 +113,8 @@ class UserController extends Controller
             ]);
         }
 
+        $this->syncActivePairingToFirebase($patient, $caregiver);
+
         return redirect()->route('dashboard.caregiver')
             ->with('status', 'Connected to patient: ' . $patient->name);
     }
@@ -194,6 +198,36 @@ class UserController extends Controller
         ]);
     }
 
+    public function caregiverLiveTrackingFirebaseAuth(): JsonResponse
+    {
+        /** @var \App\Models\User|null $caregiver */
+        $caregiver = Auth::user();
+
+        if (!$caregiver || $caregiver->role !== 'caregiver') {
+            return response()->json([
+                'message' => 'Only caregiver accounts can view patient live tracking.',
+            ], 403);
+        }
+
+        $patient = $this->getActivePatientForCaregiver($caregiver);
+
+        if (!$patient) {
+            return response()->json([
+                'message' => 'Connect to a patient first to view live tracking.',
+            ], 404);
+        }
+
+        return $this->firebaseAuthResponse(
+            'caregiver:' . $caregiver->user_id,
+            [
+                'role' => 'caregiver',
+                'caregiver_user_id' => (string) $caregiver->user_id,
+                'paired_vi_users' => [(string) $patient->user_id => true],
+            ],
+            'live_locations/' . $patient->user_id
+        );
+    }
+
     public function patientDashboard(Request $request)
     {
         /** @var \App\Models\User|null $patient */
@@ -234,6 +268,27 @@ class UserController extends Controller
         return view('patient.navigation.navigation_page', [
             'patient' => $patient,
         ]);
+    }
+
+    public function patientLiveLocationFirebaseAuth(): JsonResponse
+    {
+        /** @var \App\Models\User|null $patient */
+        $patient = Auth::user();
+
+        if (!$patient || $patient->role !== 'vi') {
+            return response()->json([
+                'message' => 'Only patient accounts can share live location.',
+            ], 403);
+        }
+
+        return $this->firebaseAuthResponse(
+            'vi:' . $patient->user_id,
+            [
+                'role' => 'vi',
+                'vi_user_id' => (string) $patient->user_id,
+            ],
+            'live_locations/' . $patient->user_id
+        );
     }
 
     public function patientHistory()
@@ -303,6 +358,16 @@ class UserController extends Controller
             'status' => 'ongoing',
         ]);
 
+        $this->writeLiveLocationToFirebase($patient, [
+            'latitude' => (float) $validated['origin_latitude'],
+            'longitude' => (float) $validated['origin_longitude'],
+            'accuracy' => null,
+            'navigation_session_id' => $session->id,
+            'session_status' => $session->status,
+            'connection_state' => 'online',
+            'source' => 'laravel-session-start',
+        ]);
+
         return response()->json([
             'message' => 'Navigation session started.',
             'data' => [
@@ -345,6 +410,18 @@ class UserController extends Controller
             'end_time' => now(),
         ]);
 
+        if (isset($validated['current_latitude'], $validated['current_longitude'])) {
+            $this->writeLiveLocationToFirebase($patient, [
+                'latitude' => (float) $validated['current_latitude'],
+                'longitude' => (float) $validated['current_longitude'],
+                'accuracy' => null,
+                'navigation_session_id' => $navigationSession->id,
+                'session_status' => $navigationSession->status,
+                'connection_state' => 'offline',
+                'source' => 'laravel-session-end',
+            ]);
+        }
+
         return response()->json([
             'message' => 'Navigation session updated.',
             'data' => [
@@ -372,6 +449,7 @@ class UserController extends Controller
         $validated = $request->validate([
             'current_latitude' => ['required', 'numeric', 'between:-90,90'],
             'current_longitude' => ['required', 'numeric', 'between:-180,180'],
+            'accuracy' => ['nullable', 'numeric', 'min:0'],
         ]);
 
         if ($navigationSession->status !== 'ongoing') {
@@ -384,6 +462,16 @@ class UserController extends Controller
             'current_latitude' => $validated['current_latitude'],
             'current_longitude' => $validated['current_longitude'],
             'location_updated_at' => now(),
+        ]);
+
+        $this->writeLiveLocationToFirebase($patient, [
+            'latitude' => (float) $validated['current_latitude'],
+            'longitude' => (float) $validated['current_longitude'],
+            'accuracy' => isset($validated['accuracy']) ? (float) $validated['accuracy'] : null,
+            'navigation_session_id' => $navigationSession->id,
+            'session_status' => $navigationSession->status,
+            'connection_state' => 'online',
+            'source' => 'laravel-session-location',
         ]);
 
         return response()->json([
@@ -630,6 +718,120 @@ class UserController extends Controller
             'lat' => $latitude,
             'lng' => $longitude,
         ];
+    }
+
+    private function firebaseAuthResponse(string $uid, array $claims, string $liveLocationPath): JsonResponse
+    {
+        $config = $this->firebaseBrowserConfig();
+
+        if (!$this->hasFirebaseBrowserConfig($config)) {
+            return response()->json([
+                'message' => 'Firebase browser configuration is incomplete. Set FIREBASE_API_KEY and FIREBASE_DATABASE_URL.',
+            ], 503);
+        }
+
+        try {
+            /** @var FirebaseService $firebase */
+            $firebase = app(FirebaseService::class);
+
+            return response()->json([
+                'data' => [
+                    'config' => $config,
+                    'token' => $firebase->createCustomToken($uid, $claims),
+                    'live_location_path' => $liveLocationPath,
+                ],
+            ]);
+        } catch (\Throwable $exception) {
+            Log::warning('Unable to create Firebase live tracking token.', [
+                'message' => $exception->getMessage(),
+            ]);
+
+            return response()->json([
+                'message' => 'Firebase live tracking is not available right now.',
+            ], 503);
+        }
+    }
+
+    private function firebaseBrowserConfig(): array
+    {
+        return [
+            'apiKey' => config('services.firebase.api_key'),
+            'authDomain' => config('services.firebase.auth_domain'),
+            'databaseURL' => config('services.firebase.database_url'),
+            'projectId' => config('services.firebase.project_id'),
+            'appId' => config('services.firebase.app_id'),
+        ];
+    }
+
+    private function hasFirebaseBrowserConfig(array $config): bool
+    {
+        return is_string($config['apiKey'] ?? null)
+            && trim($config['apiKey']) !== ''
+            && is_string($config['databaseURL'] ?? null)
+            && trim($config['databaseURL']) !== '';
+    }
+
+    private function writeLiveLocationToFirebase(User $patient, array $payload): void
+    {
+        if (!$this->shouldUseFirebaseAdmin()) {
+            return;
+        }
+
+        try {
+            /** @var FirebaseService $firebase */
+            $firebase = app(FirebaseService::class);
+            $firebase->getDatabase()
+                ->getReference('live_locations/' . $patient->user_id)
+                ->update(array_merge($payload, [
+                    'vi_user_id' => (string) $patient->user_id,
+                    'updated_at' => now()->toIso8601String(),
+                    'updated_at_ms' => now()->valueOf(),
+                ]));
+        } catch (\Throwable $exception) {
+            Log::warning('Unable to write live location to Firebase.', [
+                'patient_id' => $patient->user_id,
+                'message' => $exception->getMessage(),
+            ]);
+        }
+    }
+
+    private function syncActivePairingToFirebase(User $patient, User $caregiver): void
+    {
+        if (!$this->shouldUseFirebaseAdmin()) {
+            return;
+        }
+
+        try {
+            /** @var FirebaseService $firebase */
+            $firebase = app(FirebaseService::class);
+            $firebase->getDatabase()
+                ->getReference('pairings/' . $patient->user_id . '/' . $caregiver->user_id)
+                ->set([
+                    'active' => true,
+                    'paired_at' => now()->toIso8601String(),
+                ]);
+        } catch (\Throwable $exception) {
+            Log::warning('Unable to sync pairing to Firebase.', [
+                'patient_id' => $patient->user_id,
+                'caregiver_id' => $caregiver->user_id,
+                'message' => $exception->getMessage(),
+            ]);
+        }
+    }
+
+    private function shouldUseFirebaseAdmin(): bool
+    {
+        if (app()->environment('testing')) {
+            return false;
+        }
+
+        $credentials = config('services.firebase.credentials');
+        $databaseUrl = config('services.firebase.database_url');
+
+        return is_string($credentials)
+            && trim($credentials) !== ''
+            && is_string($databaseUrl)
+            && trim($databaseUrl) !== '';
     }
 
     private function requirePatientNavigationAccess(): ?JsonResponse

@@ -9,6 +9,9 @@
     <link href="https://fonts.googleapis.com/css2?family=Poppins:wght@300;400;500;600;700&display=swap" rel="stylesheet">
     <link href="https://api.mapbox.com/mapbox-gl-js/v2.15.0/mapbox-gl.css" rel="stylesheet">
     <script src="https://api.mapbox.com/mapbox-gl-js/v2.15.0/mapbox-gl.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/10.12.5/firebase-app-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/10.12.5/firebase-auth-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/10.12.5/firebase-database-compat.js"></script>
     <style>
         :root {
             --bg-dark: #06111a;
@@ -702,6 +705,9 @@
             search: @json(route('patient.navigation.mapbox.search', [], false)),
             directions: @json(route('patient.navigation.mapbox.directions', [], false)),
         };
+        const liveLocationRoutes = {
+            firebaseAuth: @json(route('patient.live_location.firebase_auth', [], false)),
+        };
 
         const currentLocationInput = document.getElementById('current-location');
         const destinationInput = document.getElementById('destination');
@@ -737,12 +743,20 @@
             suggestionTimeoutId: null,
             navigationSessionId: null,
             lastLocationSyncAt: 0,
+            lastFirebaseSyncAt: 0,
+            lastFirebaseCoordinates: null,
             liveSyncIntervalId: null,
             lastKnownAccuracy: null,
+            firebaseReady: false,
+            firebaseInitializing: null,
+            liveLocationRef: null,
+            liveLocationOnDisconnect: null,
         };
 
         const NAVIGATION_MANEUVER_THRESHOLD_METERS = 30;
         const LOCATION_SYNC_INTERVAL_MS = 3000;
+        const FIREBASE_LOCATION_SYNC_INTERVAL_MS = 2500;
+        const FIREBASE_MIN_DISTANCE_METERS = 4;
         const GEOLOCATION_OPTIONS = {
             enableHighAccuracy: true,
             timeout: 20000,
@@ -946,6 +960,8 @@
                 state.liveSyncIntervalId = null;
             }
 
+            updateFirebaseSharingState(false).catch(error => console.error(error));
+
             if ('speechSynthesis' in window) {
                 window.speechSynthesis.cancel();
             }
@@ -1020,6 +1036,118 @@
             state.navigationSessionId = data.data?.id || null;
         }
 
+        function hasValidLngLat(coords) {
+            return Array.isArray(coords) &&
+                coords.length >= 2 &&
+                Number.isFinite(Number(coords[0])) &&
+                Number.isFinite(Number(coords[1])) &&
+                Number(coords[1]) >= -90 &&
+                Number(coords[1]) <= 90 &&
+                Number(coords[0]) >= -180 &&
+                Number(coords[0]) <= 180;
+        }
+
+        async function fetchJson(url) {
+            const response = await fetch(url, {
+                headers: {
+                    'Accept': 'application/json',
+                },
+                credentials: 'same-origin',
+            });
+            const payload = await response.json().catch(() => ({}));
+
+            if (!response.ok) {
+                throw new Error(payload.message || 'Unable to connect live location.');
+            }
+
+            return payload;
+        }
+
+        async function initializeFirebaseLiveLocation() {
+            if (state.firebaseReady) {
+                return true;
+            }
+
+            if (state.firebaseInitializing) {
+                return state.firebaseInitializing;
+            }
+
+            state.firebaseInitializing = (async () => {
+                if (!window.firebase?.initializeApp) {
+                    throw new Error('Firebase scripts did not load.');
+                }
+
+                const payload = await fetchJson(liveLocationRoutes.firebaseAuth);
+                const data = payload.data || {};
+
+                if (!firebase.apps.length) {
+                    firebase.initializeApp(data.config);
+                }
+
+                await firebase.auth().signInWithCustomToken(data.token);
+                state.liveLocationRef = firebase.database().ref(data.live_location_path);
+                state.liveLocationOnDisconnect = state.liveLocationRef.onDisconnect();
+                state.liveLocationOnDisconnect.update({
+                    connection_state: 'offline',
+                    disconnected_at: firebase.database.ServerValue.TIMESTAMP,
+                });
+                state.firebaseReady = true;
+                return true;
+            })().catch(error => {
+                state.firebaseInitializing = null;
+                state.firebaseReady = false;
+                throw error;
+            });
+
+            return state.firebaseInitializing;
+        }
+
+        async function syncFirebaseLiveLocation(force = false) {
+            if (!state.navigationStarted || !state.currentCoordinates || !hasValidLngLat(state.currentCoordinates)) {
+                return;
+            }
+
+            const now = Date.now();
+            const movedEnough = !state.lastFirebaseCoordinates ||
+                getDistanceBetweenCoordsMeters(state.lastFirebaseCoordinates, state.currentCoordinates) >=
+                FIREBASE_MIN_DISTANCE_METERS;
+
+            if (!force && !movedEnough && now - state.lastFirebaseSyncAt < FIREBASE_LOCATION_SYNC_INTERVAL_MS) {
+                return;
+            }
+
+            await initializeFirebaseLiveLocation();
+
+            const [lng, lat] = state.currentCoordinates;
+            await state.liveLocationRef.update({
+                latitude: lat,
+                longitude: lng,
+                accuracy: Number.isFinite(Number(state.lastKnownAccuracy)) ? Number(state.lastKnownAccuracy) : null,
+                navigation_session_id: state.navigationSessionId,
+                session_status: 'ongoing',
+                connection_state: 'online',
+                source: 'browser-watchPosition',
+                updated_at: new Date().toISOString(),
+                updated_at_ms: firebase.database.ServerValue.TIMESTAMP,
+            });
+
+            state.lastFirebaseSyncAt = now;
+            state.lastFirebaseCoordinates = [...state.currentCoordinates];
+        }
+
+        async function updateFirebaseSharingState(isSharing) {
+            if (!state.liveLocationRef || !state.firebaseReady) {
+                return;
+            }
+
+            await state.liveLocationRef.update({
+                connection_state: isSharing ? 'online' : 'offline',
+                session_status: isSharing ? 'ongoing' : 'interrupted',
+                updated_at: new Date().toISOString(),
+                updated_at_ms: firebase.database.ServerValue.TIMESTAMP,
+            });
+        }
+
         async function syncNavigationSessionLocation(force = false) {
             if (!state.navigationSessionId || !state.currentCoordinates) {
                 return;
@@ -1038,12 +1166,19 @@
                 'PATCH', {
                     current_latitude: currentLat,
                     current_longitude: currentLng,
+                    accuracy: state.lastKnownAccuracy,
                 }
             );
         }
 
         function applyPhonePosition(position, options = {}) {
             const coords = [position.coords.longitude, position.coords.latitude];
+
+            if (!hasValidLngLat(coords)) {
+                setStatus('Ignoring invalid GPS coordinates from the browser.');
+                return state.currentCoordinates;
+            }
+
             state.currentCoordinates = coords;
             state.lastKnownAccuracy = position.coords.accuracy;
             setCurrentMarker(coords);
@@ -1058,6 +1193,10 @@
 
             if (state.navigationStarted) {
                 syncNavigationSessionLocation(options.forceSync).catch(error => console.error(error));
+                syncFirebaseLiveLocation(options.forceSync).catch(error => {
+                    console.error(error);
+                    setStatus(`Live tracking is using local session sync. ${error.message}`);
+                });
                 handleNavigationProgress();
                 setStatus(`Live tracking active. ${formatAccuracy(state.lastKnownAccuracy)}`);
             }
@@ -1181,7 +1320,9 @@
             }
 
             state.watchId = navigator.geolocation.watchPosition(position => {
-                applyPhonePosition(position);
+                applyPhonePosition(position, {
+                    forceSync: false,
+                });
             }, error => {
                 console.error(error);
                 setStatus(geolocationErrorMessage(error));
@@ -1193,6 +1334,7 @@
 
             state.liveSyncIntervalId = window.setInterval(() => {
                 syncNavigationSessionLocation(true).catch(error => console.error(error));
+                syncFirebaseLiveLocation(true).catch(error => console.error(error));
             }, 5000);
         }
 
@@ -1219,6 +1361,7 @@
             }
 
             await syncNavigationSessionLocation(true);
+            await syncFirebaseLiveLocation(true);
             startLiveTracking();
             announceCurrentStep();
         }
@@ -1659,6 +1802,20 @@
             ensureRouteLayer();
             resetDirections();
             detectCurrentLocation();
+        });
+
+        window.addEventListener('pagehide', () => {
+            if (state.watchId !== null) {
+                navigator.geolocation.clearWatch(state.watchId);
+                state.watchId = null;
+            }
+
+            if (state.liveSyncIntervalId !== null) {
+                window.clearInterval(state.liveSyncIntervalId);
+                state.liveSyncIntervalId = null;
+            }
+
+            updateFirebaseSharingState(false).catch(() => {});
         });
     </script>
 </body>
