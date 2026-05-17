@@ -1135,6 +1135,15 @@
             state.lastFirebaseCoordinates = [...state.currentCoordinates];
         }
 
+        async function syncFirebaseLiveLocationSafely(force = false) {
+            try {
+                await syncFirebaseLiveLocation(force);
+            } catch (error) {
+                console.error(error);
+                setStatus(`Live tracking is using local session sync. ${error.message}`);
+            }
+        }
+
         async function updateFirebaseSharingState(isSharing) {
             if (!state.liveLocationRef || !state.firebaseReady) {
                 return;
@@ -1193,10 +1202,7 @@
 
             if (state.navigationStarted) {
                 syncNavigationSessionLocation(options.forceSync).catch(error => console.error(error));
-                syncFirebaseLiveLocation(options.forceSync).catch(error => {
-                    console.error(error);
-                    setStatus(`Live tracking is using local session sync. ${error.message}`);
-                });
+                syncFirebaseLiveLocationSafely(options.forceSync);
                 handleNavigationProgress();
                 setStatus(`Live tracking active. ${formatAccuracy(state.lastKnownAccuracy)}`);
             }
@@ -1334,7 +1340,7 @@
 
             state.liveSyncIntervalId = window.setInterval(() => {
                 syncNavigationSessionLocation(true).catch(error => console.error(error));
-                syncFirebaseLiveLocation(true).catch(error => console.error(error));
+                syncFirebaseLiveLocationSafely(true);
             }, 5000);
         }
 
@@ -1361,7 +1367,7 @@
             }
 
             await syncNavigationSessionLocation(true);
-            await syncFirebaseLiveLocation(true);
+            await syncFirebaseLiveLocationSafely(true);
             startLiveTracking();
             announceCurrentStep();
         }

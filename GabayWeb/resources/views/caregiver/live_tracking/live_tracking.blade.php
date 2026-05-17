@@ -665,6 +665,13 @@
             return point ? [point.lng, point.lat] : null;
         }
 
+        function isValidCoordinateArray(coordinates) {
+            return Array.isArray(coordinates) &&
+                coordinates.length >= 2 &&
+                Number.isFinite(Number(coordinates[0])) &&
+                Number.isFinite(Number(coordinates[1]));
+        }
+
         function formatCoords(coordinates) {
             const point = normalizeCoordinate(coordinates);
 
@@ -727,17 +734,22 @@
         }
 
         function focusPatientLocation(coordinates) {
-            if (!coordinates) {
+            if (!isValidCoordinateArray(coordinates)) {
                 return;
             }
 
             map.resize();
-            map.jumpTo({
-                center: coordinates,
-                zoom: 17,
-            });
-            elements.mapStatus.textContent =
-                `Following patient at ${coordinates[1].toFixed(6)}, ${coordinates[0].toFixed(6)}.`;
+            try {
+                map.jumpTo({
+                    center: coordinates,
+                    zoom: 17,
+                });
+                elements.mapStatus.textContent =
+                    `Following patient at ${Number(coordinates[1]).toFixed(6)}, ${Number(coordinates[0]).toFixed(6)}.`;
+            } catch (error) {
+                console.error(error);
+                elements.mapStatus.textContent = 'Received a live location that Mapbox could not render.';
+            }
         }
 
         function setMarkers(session) {
@@ -750,42 +762,56 @@
             const currentArray = coordinateArray(current);
             const destinationArray = coordinateArray(destination);
 
-            if (currentArray) {
+            if (isValidCoordinateArray(currentArray)) {
                 if (!state.patientMarker) {
                     state.patientMarker = new mapboxgl.Marker({
                         element: markerElement('patient-marker'),
                     }).addTo(map);
                 }
 
-                state.patientMarker.setLngLat(currentArray);
+                try {
+                    state.patientMarker.setLngLat(currentArray);
+                } catch (error) {
+                    console.error(error);
+                    elements.mapStatus.textContent = 'Patient marker received invalid coordinates.';
+                    return false;
+                }
             }
 
-            if (destinationArray) {
+            if (isValidCoordinateArray(destinationArray)) {
                 if (!state.destinationMarker) {
                     state.destinationMarker = new mapboxgl.Marker({
                         element: markerElement('destination-marker'),
                     }).addTo(map);
                 }
 
-                state.destinationMarker
-                    .setLngLat(destinationArray)
-                    .setPopup(new mapboxgl.Popup({
-                        offset: 20,
-                    }).setHTML(`<strong>Destination</strong><br>${session.destination || ''}`));
+                try {
+                    state.destinationMarker
+                        .setLngLat(destinationArray)
+                        .setPopup(new mapboxgl.Popup({
+                            offset: 20,
+                        }).setHTML(`<strong>Destination</strong><br>${session.destination || ''}`));
+                } catch (error) {
+                    console.error(error);
+                }
             }
 
-            if (currentArray) {
+            if (isValidCoordinateArray(currentArray)) {
                 focusPatientLocation(currentArray);
-            } else if (destinationArray) {
-                map.flyTo({
-                    center: destinationArray,
-                    zoom: 15,
-                    duration: 800,
-                    essential: true,
-                });
+            } else if (isValidCoordinateArray(destinationArray)) {
+                try {
+                    map.flyTo({
+                        center: destinationArray,
+                        zoom: 15,
+                        duration: 800,
+                        essential: true,
+                    });
+                } catch (error) {
+                    console.error(error);
+                }
             }
 
-            return Boolean(currentArray || destinationArray);
+            return Boolean(isValidCoordinateArray(currentArray) || isValidCoordinateArray(destinationArray));
         }
 
         async function drawRoute(session) {

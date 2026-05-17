@@ -826,10 +826,13 @@ class UserController extends Controller
         }
 
         $credentials = config('services.firebase.credentials');
+        $credentialsJson = config('services.firebase.credentials_json');
         $databaseUrl = config('services.firebase.database_url');
 
-        return is_string($credentials)
-            && trim($credentials) !== ''
+        $hasCredentials = (is_string($credentials) && trim($credentials) !== '')
+            || (is_string($credentialsJson) && trim($credentialsJson) !== '');
+
+        return $hasCredentials
             && is_string($databaseUrl)
             && trim($databaseUrl) !== '';
     }

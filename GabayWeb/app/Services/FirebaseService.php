@@ -12,11 +12,18 @@ class FirebaseService
     public function __construct()
     {
         $credentials = config('services.firebase.credentials');
+        $credentialsJson = config('services.firebase.credentials_json');
         $databaseUrl = config('services.firebase.database_url');
 
         $factory = new Factory;
 
-        if (is_string($credentials) && trim($credentials) !== '') {
+        $decodedCredentials = is_string($credentialsJson) && trim($credentialsJson) !== ''
+            ? json_decode($credentialsJson, true)
+            : null;
+
+        if (is_array($decodedCredentials)) {
+            $factory = $factory->withServiceAccount($decodedCredentials);
+        } elseif (is_string($credentials) && trim($credentials) !== '') {
             $factory = $factory->withServiceAccount(base_path($credentials));
         }
 
