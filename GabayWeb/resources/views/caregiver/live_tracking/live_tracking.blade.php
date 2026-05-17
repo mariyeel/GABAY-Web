@@ -665,6 +665,21 @@
             return point ? [point.lng, point.lat] : null;
         }
 
+        function mapboxPoint(coordinates) {
+            const point = normalizeCoordinate(coordinates);
+
+            return point ? {
+                lng: point.lng,
+                lat: point.lat,
+            } : null;
+        }
+
+        function routePointKey(coordinates) {
+            const point = normalizeCoordinate(coordinates);
+
+            return point ? `${point.lng.toFixed(4)},${point.lat.toFixed(4)}` : '';
+        }
+
         function isValidCoordinateArray(coordinates) {
             return Array.isArray(coordinates) &&
                 coordinates.length >= 2 &&
@@ -734,18 +749,20 @@
         }
 
         function focusPatientLocation(coordinates) {
-            if (!isValidCoordinateArray(coordinates)) {
+            const point = mapboxPoint(coordinates);
+
+            if (!point) {
                 return;
             }
 
             map.resize();
             try {
                 map.jumpTo({
-                    center: coordinates,
+                    center: point,
                     zoom: 17,
                 });
                 elements.mapStatus.textContent =
-                    `Following patient at ${Number(coordinates[1]).toFixed(6)}, ${Number(coordinates[0]).toFixed(6)}.`;
+                    `Following patient at ${point.lat.toFixed(6)}, ${point.lng.toFixed(6)}.`;
             } catch (error) {
                 console.error(error);
                 elements.mapStatus.textContent = 'Received a live location that Mapbox could not render.';
@@ -759,10 +776,10 @@
 
             const current = normalizeCoordinate(session.current_coordinates || session.origin_coordinates);
             const destination = normalizeCoordinate(session.destination_coordinates);
-            const currentArray = coordinateArray(current);
-            const destinationArray = coordinateArray(destination);
+            const currentPoint = mapboxPoint(current);
+            const destinationPoint = mapboxPoint(destination);
 
-            if (isValidCoordinateArray(currentArray)) {
+            if (currentPoint) {
                 if (!state.patientMarker) {
                     state.patientMarker = new mapboxgl.Marker({
                         element: markerElement('patient-marker'),
@@ -770,7 +787,7 @@
                 }
 
                 try {
-                    state.patientMarker.setLngLat(currentArray);
+                    state.patientMarker.setLngLat(currentPoint);
                 } catch (error) {
                     console.error(error);
                     elements.mapStatus.textContent = 'Patient marker received invalid coordinates.';
@@ -778,7 +795,7 @@
                 }
             }
 
-            if (isValidCoordinateArray(destinationArray)) {
+            if (destinationPoint) {
                 if (!state.destinationMarker) {
                     state.destinationMarker = new mapboxgl.Marker({
                         element: markerElement('destination-marker'),
@@ -787,7 +804,7 @@
 
                 try {
                     state.destinationMarker
-                        .setLngLat(destinationArray)
+                        .setLngLat(destinationPoint)
                         .setPopup(new mapboxgl.Popup({
                             offset: 20,
                         }).setHTML(`<strong>Destination</strong><br>${session.destination || ''}`));
@@ -796,12 +813,12 @@
                 }
             }
 
-            if (isValidCoordinateArray(currentArray)) {
-                focusPatientLocation(currentArray);
-            } else if (isValidCoordinateArray(destinationArray)) {
+            if (currentPoint) {
+                focusPatientLocation(currentPoint);
+            } else if (destinationPoint) {
                 try {
                     map.flyTo({
-                        center: destinationArray,
+                        center: destinationPoint,
                         zoom: 15,
                         duration: 800,
                         essential: true,
@@ -811,7 +828,7 @@
                 }
             }
 
-            return Boolean(isValidCoordinateArray(currentArray) || isValidCoordinateArray(destinationArray));
+            return Boolean(currentPoint || destinationPoint);
         }
 
         async function drawRoute(session) {
@@ -835,8 +852,13 @@
 
             const currentArray = coordinateArray(current);
             const destinationArray = coordinateArray(destination);
-            const roundedCurrent = currentArray.map(value => Number(value).toFixed(4)).join(',');
-            const roundedDestination = destinationArray.map(value => Number(value).toFixed(4)).join(',');
+
+            if (!isValidCoordinateArray(currentArray) || !isValidCoordinateArray(destinationArray)) {
+                return;
+            }
+
+            const roundedCurrent = routePointKey(current);
+            const roundedDestination = routePointKey(destination);
             const routeKey = `${roundedCurrent};${roundedDestination}`;
             const routeThrottleActive = Date.now() - state.lastRouteDrawAt < 30000;
             if (routeKey === state.lastRouteKey || routeThrottleActive) {
@@ -874,6 +896,15 @@
         }
 
         function renderTrackingData(data) {
+            try {
+                renderTrackingDataSafely(data);
+            } catch (error) {
+                console.error(error);
+                elements.mapStatus.textContent = error.message || 'Unable to render live tracking data.';
+            }
+        }
+
+        function renderTrackingDataSafely(data) {
             const patient = data?.patient;
             const session = data?.session;
 
@@ -923,37 +954,43 @@
         }
 
         function mergeFirebaseLocation(location) {
-            if (!location || typeof location !== 'object') {
-                return;
+            try {
+                if (!location || typeof location !== 'object') {
+                    return;
+                }
+
+                const point = normalizeCoordinate(location);
+                if (!point) {
+                    elements.mapStatus.textContent = 'Received invalid GPS coordinates from Firebase.';
+                    return;
+                }
+
+                const baseSession = state.latestSession || {};
+                const timestamp = Number(location.updated_at_ms);
+                const session = {
+                    ...baseSession,
+                    id: location.navigation_session_id || baseSession.id || null,
+                    status: location.session_status || baseSession.status || 'ongoing',
+                    location_updated_at: location.updated_at || new Date(Number.isFinite(timestamp) ? timestamp : Date.now()).toISOString(),
+                    current_coordinates: {
+                        lat: point.lat,
+                        lng: point.lng,
+                    },
+                };
+
+                renderTrackingData({
+                    patient: state.latestPatient,
+                    session,
+                });
+
+                elements.pollingStatus.textContent =
+                    location.connection_state === 'offline' ? 'Firebase connected - patient offline' : 'Firebase live listener active';
+                elements.lastUpdate.textContent =
+                    `Last GPS update: ${formatTime(session.location_updated_at)}${Number.isFinite(Number(location.accuracy)) ? ` (${Math.round(Number(location.accuracy))}m accuracy)` : ''}`;
+            } catch (error) {
+                console.error(error);
+                elements.mapStatus.textContent = error.message || 'Unable to render Firebase live location.';
             }
-
-            const point = normalizeCoordinate(location);
-            if (!point) {
-                elements.mapStatus.textContent = 'Received invalid GPS coordinates from Firebase.';
-                return;
-            }
-
-            const baseSession = state.latestSession || {};
-            const session = {
-                ...baseSession,
-                id: location.navigation_session_id || baseSession.id || null,
-                status: location.session_status || baseSession.status || 'ongoing',
-                location_updated_at: location.updated_at || new Date(Number(location.updated_at_ms || Date.now())).toISOString(),
-                current_coordinates: {
-                    lat: point.lat,
-                    lng: point.lng,
-                },
-            };
-
-            renderTrackingData({
-                patient: state.latestPatient,
-                session,
-            });
-
-            elements.pollingStatus.textContent =
-                location.connection_state === 'offline' ? 'Firebase connected - patient offline' : 'Firebase live listener active';
-            elements.lastUpdate.textContent =
-                `Last GPS update: ${formatTime(session.location_updated_at)}${Number.isFinite(Number(location.accuracy)) ? ` (${Math.round(Number(location.accuracy))}m accuracy)` : ''}`;
         }
 
         async function fetchJson(url) {
