@@ -152,6 +152,98 @@ class UserController extends Controller
         ]);
     }
 
+    public function caregiverNavigation()
+    {
+        /** @var \App\Models\User|null $caregiver */
+        $caregiver = Auth::user();
+
+        if (!$caregiver) {
+            return redirect()->route('login.create')
+                ->withErrors(['login' => 'Please log in to set a patient destination.']);
+        }
+
+        if ($caregiver->role !== 'caregiver') {
+            return $this->redirectToDashboard($caregiver);
+        }
+
+        $connectedPatient = $this->getActivePatientForCaregiver($caregiver);
+        $latestSession = $connectedPatient
+            ? $this->getLatestNavigationSessionForPatient($connectedPatient)
+            : null;
+
+        return view('caregiver.navigation.navigation_page', [
+            'caregiver' => $caregiver,
+            'connectedPatient' => $connectedPatient,
+            'initialNavigationSession' => $latestSession ? $this->formatNavigationSessionForTracking($latestSession) : null,
+        ]);
+    }
+
+    public function caregiverStartNavigationSession(Request $request): JsonResponse
+    {
+        /** @var \App\Models\User|null $caregiver */
+        $caregiver = Auth::user();
+
+        if (!$caregiver || $caregiver->role !== 'caregiver') {
+            return response()->json([
+                'message' => 'Only caregiver accounts can set a patient destination.',
+            ], 403);
+        }
+
+        $patient = $this->getActivePatientForCaregiver($caregiver);
+
+        if (!$patient) {
+            return response()->json([
+                'message' => 'Connect to a patient first before setting a destination.',
+            ], 404);
+        }
+
+        $validated = $request->validate([
+            'origin' => ['nullable', 'string', 'max:255'],
+            'origin_latitude' => ['nullable', 'numeric', 'between:-90,90'],
+            'origin_longitude' => ['nullable', 'numeric', 'between:-180,180'],
+            'destination' => ['required', 'string', 'max:255'],
+            'destination_latitude' => ['required', 'numeric', 'between:-90,90'],
+            'destination_longitude' => ['required', 'numeric', 'between:-180,180'],
+        ]);
+
+        $latestSession = $this->getLatestNavigationSessionForPatient($patient);
+        $originLatitude = $validated['origin_latitude'] ?? $latestSession?->current_latitude;
+        $originLongitude = $validated['origin_longitude'] ?? $latestSession?->current_longitude;
+        $origin = $validated['origin']
+            ?? ($originLatitude !== null && $originLongitude !== null
+                ? 'Latest patient location'
+                : 'Waiting for patient current location');
+
+        NavigationSession::query()
+            ->where('user_id', $patient->user_id)
+            ->where('status', 'ongoing')
+            ->update([
+                'status' => 'interrupted',
+                'end_time' => now(),
+            ]);
+
+        $session = NavigationSession::create([
+            'user_id' => $patient->user_id,
+            'caregiver_user_id' => $caregiver->user_id,
+            'origin' => $origin,
+            'origin_latitude' => $originLatitude,
+            'origin_longitude' => $originLongitude,
+            'destination' => $validated['destination'],
+            'destination_latitude' => $validated['destination_latitude'],
+            'destination_longitude' => $validated['destination_longitude'],
+            'current_latitude' => $originLatitude,
+            'current_longitude' => $originLongitude,
+            'location_updated_at' => $originLatitude !== null && $originLongitude !== null ? now() : null,
+            'start_time' => now(),
+            'status' => 'ongoing',
+        ]);
+
+        return response()->json([
+            'message' => 'Patient destination saved.',
+            'data' => $this->formatNavigationSessionForTracking($session),
+        ]);
+    }
+
     public function caregiverLiveTrackingSession(): JsonResponse
     {
         /** @var \App\Models\User|null $caregiver */
@@ -267,6 +359,12 @@ class UserController extends Controller
 
         return view('patient.navigation.navigation_page', [
             'patient' => $patient,
+            'initialAssignedSession' => ($session = NavigationSession::query()
+                ->where('user_id', $patient->user_id)
+                ->where('status', 'ongoing')
+                ->latest('start_time')
+                ->latest('id')
+                ->first()) ? $this->formatNavigationSessionForTracking($session) : null,
         ]);
     }
 
@@ -289,6 +387,31 @@ class UserController extends Controller
             ],
             'live_locations/' . $patient->user_id
         );
+    }
+
+    public function patientAssignedNavigationSession(): JsonResponse
+    {
+        /** @var \App\Models\User|null $patient */
+        $patient = Auth::user();
+
+        if (!$patient || $patient->role !== 'vi') {
+            return response()->json([
+                'message' => 'Only patient accounts can view assigned navigation sessions.',
+            ], 403);
+        }
+
+        $session = NavigationSession::query()
+            ->where('user_id', $patient->user_id)
+            ->where('status', 'ongoing')
+            ->latest('start_time')
+            ->latest('id')
+            ->first();
+
+        return response()->json([
+            'data' => [
+                'session' => $session ? $this->formatNavigationSessionForTracking($session) : null,
+            ],
+        ]);
     }
 
     public function patientHistory()
@@ -317,64 +440,9 @@ class UserController extends Controller
 
     public function startNavigationSession(Request $request): JsonResponse
     {
-        /** @var \App\Models\User|null $patient */
-        $patient = Auth::user();
-
-        if (!$patient || $patient->role !== 'vi') {
-            return response()->json([
-                'message' => 'Only patient accounts can start a navigation session.',
-            ], 403);
-        }
-
-        $validated = $request->validate([
-            'origin' => ['required', 'string', 'max:255'],
-            'origin_latitude' => ['required', 'numeric', 'between:-90,90'],
-            'origin_longitude' => ['required', 'numeric', 'between:-180,180'],
-            'destination' => ['required', 'string', 'max:255'],
-            'destination_latitude' => ['required', 'numeric', 'between:-90,90'],
-            'destination_longitude' => ['required', 'numeric', 'between:-180,180'],
-        ]);
-
-        NavigationSession::query()
-            ->where('user_id', $patient->user_id)
-            ->where('status', 'ongoing')
-            ->update([
-                'status' => 'interrupted',
-                'end_time' => now(),
-            ]);
-
-        $session = NavigationSession::create([
-            'user_id' => $patient->user_id,
-            'origin' => $validated['origin'],
-            'origin_latitude' => $validated['origin_latitude'],
-            'origin_longitude' => $validated['origin_longitude'],
-            'destination' => $validated['destination'],
-            'destination_latitude' => $validated['destination_latitude'],
-            'destination_longitude' => $validated['destination_longitude'],
-            'current_latitude' => $validated['origin_latitude'],
-            'current_longitude' => $validated['origin_longitude'],
-            'location_updated_at' => now(),
-            'start_time' => now(),
-            'status' => 'ongoing',
-        ]);
-
-        $this->writeLiveLocationToFirebase($patient, [
-            'latitude' => (float) $validated['origin_latitude'],
-            'longitude' => (float) $validated['origin_longitude'],
-            'accuracy' => null,
-            'navigation_session_id' => $session->id,
-            'session_status' => $session->status,
-            'connection_state' => 'online',
-            'source' => 'laravel-session-start',
-        ]);
-
         return response()->json([
-            'message' => 'Navigation session started.',
-            'data' => [
-                'id' => $session->id,
-                'status' => $session->status,
-            ],
-        ]);
+            'message' => 'Navigation destinations are assigned by the connected caregiver.',
+        ], 403);
     }
 
     public function completeNavigationSession(Request $request, NavigationSession $navigationSession): JsonResponse
@@ -394,13 +462,11 @@ class UserController extends Controller
 
         $validated = $request->validate([
             'status' => ['nullable', 'in:completed,interrupted'],
-            'destination' => ['nullable', 'string', 'max:255'],
             'current_latitude' => ['nullable', 'numeric', 'between:-90,90'],
             'current_longitude' => ['nullable', 'numeric', 'between:-180,180'],
         ]);
 
         $navigationSession->update([
-            'destination' => $validated['destination'] ?? $navigationSession->destination,
             'current_latitude' => $validated['current_latitude'] ?? $navigationSession->current_latitude,
             'current_longitude' => $validated['current_longitude'] ?? $navigationSession->current_longitude,
             'location_updated_at' => isset($validated['current_latitude'], $validated['current_longitude'])
@@ -561,13 +627,8 @@ class UserController extends Controller
 
     public function caregiverMapboxDirections(Request $request): JsonResponse
     {
-        /** @var \App\Models\User|null $caregiver */
-        $caregiver = Auth::user();
-
-        if (!$caregiver || $caregiver->role !== 'caregiver' || !$this->getActivePatientForCaregiver($caregiver)) {
-            return response()->json([
-                'message' => 'Connect to a patient first to view live tracking directions.',
-            ], 403);
+        if ($response = $this->requireCaregiverNavigationAccess()) {
+            return $response;
         }
 
         $validated = $request->validate([
@@ -590,6 +651,53 @@ class UserController extends Controller
                 'steps' => 'false',
                 'language' => 'en',
             ]
+        );
+    }
+
+    public function caregiverMapboxReverseGeocode(Request $request): JsonResponse
+    {
+        if ($response = $this->requireCaregiverNavigationAccess()) {
+            return $response;
+        }
+
+        $validated = $request->validate([
+            'lng' => ['required', 'numeric', 'between:-180,180'],
+            'lat' => ['required', 'numeric', 'between:-90,90'],
+        ]);
+
+        return $this->sendMapboxRequest(
+            "https://api.mapbox.com/geocoding/v5/mapbox.places/{$validated['lng']},{$validated['lat']}.json",
+            ['limit' => 1]
+        );
+    }
+
+    public function caregiverMapboxSearch(Request $request): JsonResponse
+    {
+        if ($response = $this->requireCaregiverNavigationAccess()) {
+            return $response;
+        }
+
+        $validated = $request->validate([
+            'q' => ['required', 'string', 'max:255'],
+            'proximity_lng' => ['nullable', 'numeric', 'between:-180,180'],
+            'proximity_lat' => ['nullable', 'numeric', 'between:-90,90'],
+        ]);
+
+        $params = [
+            'limit' => 5,
+            'autocomplete' => 'true',
+            'language' => 'en',
+            'country' => 'PH',
+            'types' => 'poi,address,place,locality,neighborhood',
+        ];
+
+        if (isset($validated['proximity_lng'], $validated['proximity_lat'])) {
+            $params['proximity'] = $validated['proximity_lng'] . ',' . $validated['proximity_lat'];
+        }
+
+        return $this->sendMapboxRequest(
+            'https://api.mapbox.com/geocoding/v5/mapbox.places/' . rawurlencode($validated['q']) . '.json',
+            $params
         );
     }
 
@@ -857,6 +965,20 @@ class UserController extends Controller
 
         return response()->json([
             'message' => 'Please log in as a navigator user first to use navigation.',
+        ], 403);
+    }
+
+    private function requireCaregiverNavigationAccess(): ?JsonResponse
+    {
+        /** @var \App\Models\User|null $caregiver */
+        $caregiver = Auth::user();
+
+        if ($caregiver && $caregiver->role === 'caregiver' && $this->getActivePatientForCaregiver($caregiver)) {
+            return null;
+        }
+
+        return response()->json([
+            'message' => 'Connect to a patient first to use caregiver navigation.',
         ], 403);
     }
 

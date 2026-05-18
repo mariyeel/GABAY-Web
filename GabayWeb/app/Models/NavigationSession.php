@@ -8,6 +8,7 @@ class NavigationSession extends Model
 {
     protected $fillable = [
         'user_id',
+        'caregiver_user_id',
         'origin',
         'origin_latitude',
         'origin_longitude',
@@ -38,6 +39,11 @@ class NavigationSession extends Model
     public function user()
     {
         return $this->belongsTo(User::class, 'user_id');
+    }
+
+    public function caregiver()
+    {
+        return $this->belongsTo(User::class, 'caregiver_user_id');
     }
 
     //Helper: calculate duration

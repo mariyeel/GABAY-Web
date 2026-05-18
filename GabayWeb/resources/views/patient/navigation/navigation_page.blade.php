@@ -634,7 +634,7 @@
     <main class="main-content">
         <div class="page-shell">
             <section class="panel">
-                <h1 class="page-title">Navigation Setup</h1>
+                <h1 class="page-title">Assigned Navigation</h1>
 
                 <div class="field-group">
                     <label for="current-location">Current Location</label>
@@ -646,13 +646,13 @@
                 </div>
 
                 <div class="field-group">
-                    <label for="destination">Destination</label>
-                    <input id="destination" type="text" placeholder="Enter destination address or place name">
+                    <label for="destination">Caregiver Assigned Destination</label>
+                    <input id="destination" type="text" placeholder="Waiting for caregiver destination..." readonly>
                     <div class="suggestions-box" id="destination-suggestions"></div>
                 </div>
 
                 <div class="action-row">
-                    <button type="button" class="primary-btn" id="build-route">Show Route</button>
+                    <button type="button" class="primary-btn" id="build-route">Show Assigned Route</button>
                     <button type="button" class="secondary-btn start-btn" id="start-navigation">Start</button>
                 </div>
 
@@ -672,8 +672,7 @@
                     <ol class="directions-list" id="directions-list">
                         <li class="direction-step">
                             <strong>Waiting for destination</strong>
-                            <span>Enter a destination name, use Show Route to preview distance, then press Start for
-                                directions.</span>
+                            <span>The caregiver-assigned destination will appear here when available.</span>
                         </li>
                     </ol>
                 </section>
@@ -705,6 +704,10 @@
             search: @json(route('patient.navigation.mapbox.search', [], false)),
             directions: @json(route('patient.navigation.mapbox.directions', [], false)),
         };
+        const assignedNavigationRoutes = {
+            session: @json(route('patient.navigation.assigned_session', [], false)),
+        };
+        const initialAssignedSession = @json($initialAssignedSession);
         const liveLocationRoutes = {
             firebaseAuth: @json(route('patient.live_location.firebase_auth', [], false)),
         };
@@ -877,7 +880,7 @@
             } catch (error) {
                 console.error(error);
                 throw new Error(
-                'Unable to contact the navigation service. Please check your connection and try again.');
+                    'Unable to contact the navigation service. Please check your connection and try again.');
             }
 
             const data = await response.json().catch(() => ({}));
@@ -937,7 +940,7 @@
             directionsList.innerHTML = `
                 <li class="direction-step">
                     <strong>Waiting for destination</strong>
-                    <span>Enter a destination name, use Show Route to preview the trip, then press Start for directions.</span>
+                    <span>Ask the caregiver to assign a destination, then use Show Assigned Route or Start.</span>
                 </li>
             `;
         }
@@ -1071,6 +1074,19 @@
         }
 
         async function startNavigationSessionRecord() {
+            if (state.navigationSessionId) {
+                return;
+            }
+
+            await loadAssignedNavigationSession(false);
+            if (state.navigationSessionId) {
+                return;
+            }
+
+            throw new Error('No caregiver-assigned navigation session is available yet.');
+        }
+
+        async function createLegacyNavigationSessionRecord() {
             if (!state.currentPlaceLabel || !state.currentCoordinates || !state.destinationFeature?.place_name || !state
                 .destinationFeature?.center) {
                 return;
@@ -1141,29 +1157,29 @@
                     firebase.initializeApp(data.config);
                 }
 
-            await firebase.auth().signInWithCustomToken(data.token);
-            state.liveLocationRef = firebase.database().ref(data.live_location_path);
-            state.liveLocationOnDisconnect = state.liveLocationRef.onDisconnect();
-            state.liveLocationOnDisconnect.update({
-                connection_state: 'offline',
-                disconnected_at: firebase.database.ServerValue.TIMESTAMP,
-            });
-
-            if (data.bus_tracker_path && !state.busTrackerRef) {
-                state.busTrackerRef = firebase.database().ref(data.bus_tracker_path);
-                state.busTrackerCallback = snapshot => applyHardwareTrackerPacket(snapshot.val(), {
-                    recenter: !state.currentCoordinates,
-                    forceSync: state.navigationStarted,
+                await firebase.auth().signInWithCustomToken(data.token);
+                state.liveLocationRef = firebase.database().ref(data.live_location_path);
+                state.liveLocationOnDisconnect = state.liveLocationRef.onDisconnect();
+                state.liveLocationOnDisconnect.update({
+                    connection_state: 'offline',
+                    disconnected_at: firebase.database.ServerValue.TIMESTAMP,
                 });
-                state.busTrackerRef.on('value', state.busTrackerCallback, error => {
-                    console.error(error);
-                    setStatus(error.message || 'Unable to read ESP32 BusTracker location.');
-                });
-            }
 
-            state.firebaseReady = true;
-            return true;
-        })().catch(error => {
+                if (data.bus_tracker_path && !state.busTrackerRef) {
+                    state.busTrackerRef = firebase.database().ref(data.bus_tracker_path);
+                    state.busTrackerCallback = snapshot => applyHardwareTrackerPacket(snapshot.val(), {
+                        recenter: !state.currentCoordinates,
+                        forceSync: state.navigationStarted,
+                    });
+                    state.busTrackerRef.on('value', state.busTrackerCallback, error => {
+                        console.error(error);
+                        setStatus(error.message || 'Unable to read ESP32 BusTracker location.');
+                    });
+                }
+
+                state.firebaseReady = true;
+                return true;
+            })().catch(error => {
                 state.firebaseInitializing = null;
                 state.firebaseReady = false;
                 throw error;
@@ -1194,14 +1210,17 @@
                 longitude: lng,
                 lat,
                 lng,
-                accuracy: Number.isFinite(Number(state.lastKnownAccuracy)) ? Number(state.lastKnownAccuracy) : null,
+                accuracy: Number.isFinite(Number(state.lastKnownAccuracy)) ? Number(state.lastKnownAccuracy) :
+                    null,
                 navigation_session_id: state.navigationSessionId,
                 session_status: 'ongoing',
                 connection_state: 'online',
                 source: state.locationSource === 'esp32' ? 'esp32-bustracker' : 'browser-watchPosition',
                 deviceID: state.latestHardwarePacket?.deviceID || null,
-                topDistance: Number.isFinite(state.latestHardwarePacket?.topDistance) ? state.latestHardwarePacket.topDistance : null,
-                bottomDistance: Number.isFinite(state.latestHardwarePacket?.bottomDistance) ? state.latestHardwarePacket.bottomDistance : null,
+                topDistance: Number.isFinite(state.latestHardwarePacket?.topDistance) ? state
+                    .latestHardwarePacket.topDistance : null,
+                bottomDistance: Number.isFinite(state.latestHardwarePacket?.bottomDistance) ? state
+                    .latestHardwarePacket.bottomDistance : null,
                 topStatus: state.latestHardwarePacket?.topStatus || null,
                 bottomStatus: state.latestHardwarePacket?.bottomStatus || null,
                 updated_at: new Date().toISOString(),
@@ -1319,7 +1338,9 @@
                 handleNavigationProgress();
                 setStatus(`Live tracking active from ESP32. ${formatHardwareStatus(hardware)}`);
             } else {
-                setStatus(`Current location is ready from ESP32. ${formatHardwareStatus(hardware)} Enter a destination to build the route.`);
+                setStatus(
+                    `Current location is ready from ESP32. ${formatHardwareStatus(hardware)} Enter a destination to build the route.`
+                    );
             }
 
             return hardware.coords;
@@ -1331,7 +1352,8 @@
             }
 
             if (!window.isSecureContext) {
-                return Promise.reject(new Error('Open Gabay over HTTPS on the patient phone so the browser can use precise GPS.'));
+                return Promise.reject(new Error(
+                    'Open Gabay over HTTPS on the patient phone so the browser can use precise GPS.'));
             }
 
             return new Promise((resolve, reject) => {
@@ -1349,7 +1371,6 @@
                 `/patient/navigation/session/${state.navigationSessionId}`,
                 'PATCH', {
                     status,
-                    destination: state.destinationFeature?.place_name || destinationInput.value.trim(),
                     current_latitude: currentLat,
                     current_longitude: currentLng,
                 }
@@ -1721,6 +1742,45 @@
             renderRoute(result.route, destinationFeature, result.profile, showDirections);
         }
 
+        function applyAssignedNavigationSession(session) {
+            if (!session?.destination_coordinates) {
+                state.navigationSessionId = null;
+                state.destinationFeature = null;
+                state.syncingDestinationInput = true;
+                destinationInput.value = '';
+                state.syncingDestinationInput = false;
+                resetDirections('Waiting for caregiver destination.');
+                setStatus('No caregiver-assigned destination is available yet.');
+                return false;
+            }
+
+            const destinationFeature = {
+                center: [session.destination_coordinates.lng, session.destination_coordinates.lat],
+                place_name: session.destination || 'Assigned destination',
+            };
+
+            state.navigationSessionId = session.id;
+            state.destinationFeature = destinationFeature;
+            state.syncingDestinationInput = true;
+            destinationInput.value = destinationFeature.place_name;
+            state.syncingDestinationInput = false;
+            setDestinationMarker(destinationFeature.center, destinationFeature.place_name);
+            setStatus(`Caregiver assigned destination: ${destinationFeature.place_name}.`);
+            return true;
+        }
+
+        async function loadAssignedNavigationSession(buildRoute = false) {
+            const response = await fetchNavigationJson(assignedNavigationRoutes.session);
+            const session = response.data?.session || null;
+            const hasAssignment = applyAssignedNavigationSession(session);
+
+            if (hasAssignment && buildRoute && state.currentCoordinates) {
+                await buildRouteFromFeature(state.destinationFeature, false);
+            }
+
+            return session;
+        }
+
         async function detectCurrentLocation() {
             initializeFirebaseLiveLocation().catch(error => console.error(error));
 
@@ -1762,7 +1822,15 @@
                     currentLocationInput.value = `${coords[1].toFixed(5)}, ${coords[0].toFixed(5)}`;
                 }
 
-                setStatus(`Current location is ready. ${formatAccuracy(state.lastKnownAccuracy)} Enter a destination to build the route.`);
+                setStatus(
+                    `Current location is ready. ${formatAccuracy(state.lastKnownAccuracy)} Waiting for assigned destination.`
+                    );
+                try {
+                    await loadAssignedNavigationSession(true);
+                } catch (error) {
+                    console.error(error);
+                    setStatus(error.message || 'Unable to load the assigned destination yet.');
+                }
             } catch (error) {
                 console.error(error);
                 currentLocationInput.value = 'Permission denied or location unavailable';
@@ -1771,24 +1839,17 @@
         }
 
         async function resolveDestinationFeature() {
-            const destinationQuery = destinationInput.value.trim();
-
-            if (!destinationQuery) {
-                throw new Error('Please enter a destination first.');
-            }
-
-            if (state.destinationFeature && destinationQuery === state.destinationFeature.place_name) {
+            if (state.destinationFeature?.center) {
                 return state.destinationFeature;
             }
 
-            if (state.suggestionResults.length) {
-                const exactMatch = state.suggestionResults.find(feature =>
-                    feature.place_name === destinationQuery || feature.text === destinationQuery
-                );
-                return exactMatch || state.suggestionResults[0];
+            await loadAssignedNavigationSession(false);
+
+            if (state.destinationFeature?.center) {
+                return state.destinationFeature;
             }
 
-            return await geocodeDestination(destinationQuery);
+            throw new Error('No caregiver-assigned destination is available yet.');
         }
 
         async function previewRoute() {
@@ -1822,7 +1883,8 @@
             }
 
             setActionState(true, 'start');
-            setStatus(state.locationSource === 'esp32' ? 'Using ESP32 GPS before starting...' : 'Refreshing phone GPS before starting...');
+            setStatus(state.locationSource === 'esp32' ? 'Using ESP32 GPS before starting...' :
+                'Refreshing phone GPS before starting...');
 
             try {
                 if (state.locationSource === 'esp32' && state.latestHardwarePacket) {
@@ -1915,6 +1977,9 @@
         });
 
         map.on('click', async event => {
+            setStatus('Destination selection is managed by the caregiver.');
+            return;
+
             if (!state.currentCoordinates) {
                 setStatus('Current location is not ready yet. Please refresh location first.');
                 resetDirections('Current location is not ready yet.');
@@ -1946,6 +2011,7 @@
         map.on('load', () => {
             ensureRouteLayer();
             resetDirections();
+            applyAssignedNavigationSession(initialAssignedSession);
             initializeFirebaseLiveLocation().catch(error => console.error(error));
             detectCurrentLocation();
         });

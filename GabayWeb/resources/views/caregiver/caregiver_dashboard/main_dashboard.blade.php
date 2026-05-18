@@ -412,11 +412,20 @@
                 </a>
             </li>
             <li class="nav-item">
-                <a href="{{ route('caregiver.live_tracking') }}" class="nav-link">
+                <a href="{{ route('caregiver.navigation') }}" class="nav-link">
                     <svg width="18" height="18" viewBox="0 0 24 24" fill="none" aria-hidden="true">
                         <path d="M12 21c4.97-4.54 8-8.15 8-11a8 8 0 1 0-16 0c0 2.85 3.03 6.46 8 11Z"
                             stroke="currentColor" stroke-width="1.8" />
                         <circle cx="12" cy="10" r="2.5" fill="currentColor" />
+                    </svg>
+                    <span>Navigation</span>
+                </a>
+            </li>
+            <li class="nav-item">
+                <a href="{{ route('caregiver.live_tracking') }}" class="nav-link">
+                    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+                        <path d="M4 12h3l2-5 4 10 2-5h5" stroke="currentColor" stroke-width="1.8"
+                            stroke-linecap="round" stroke-linejoin="round" />
                     </svg>
                     <span>Tracking</span>
                 </a>
