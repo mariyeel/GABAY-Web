@@ -43,6 +43,7 @@ return [
         'auth_domain' => env('FIREBASE_AUTH_DOMAIN'),
         'project_id' => env('FIREBASE_PROJECT_ID'),
         'app_id' => env('FIREBASE_APP_ID'),
+        'bus_tracker_device_id' => env('FIREBASE_BUS_TRACKER_DEVICE_ID', 'BUS_001'),
     ],
 
     'mapbox' => [

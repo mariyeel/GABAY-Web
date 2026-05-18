@@ -739,6 +739,7 @@ class UserController extends Controller
                     'config' => $config,
                     'token' => $firebase->createCustomToken($uid, $claims),
                     'live_location_path' => $liveLocationPath,
+                    'bus_tracker_path' => $this->busTrackerPath(),
                 ],
             ]);
         } catch (\Throwable $exception) {
@@ -769,6 +770,14 @@ class UserController extends Controller
             && trim($config['apiKey']) !== ''
             && is_string($config['databaseURL'] ?? null)
             && trim($config['databaseURL']) !== '';
+    }
+
+    private function busTrackerPath(): string
+    {
+        $deviceId = config('services.firebase.bus_tracker_device_id', 'BUS_001');
+        $deviceId = is_string($deviceId) && trim($deviceId) !== '' ? trim($deviceId) : 'BUS_001';
+
+        return 'BusTracker/' . $deviceId;
     }
 
     private function writeLiveLocationToFirebase(User $patient, array $payload): void

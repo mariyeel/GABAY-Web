@@ -751,6 +751,10 @@
             firebaseInitializing: null,
             liveLocationRef: null,
             liveLocationOnDisconnect: null,
+            busTrackerRef: null,
+            busTrackerCallback: null,
+            latestHardwarePacket: null,
+            locationSource: 'browser',
         };
 
         const NAVIGATION_MANEUVER_THRESHOLD_METERS = 30;
@@ -785,6 +789,59 @@
 
         function formatAccuracy(accuracy) {
             return Number.isFinite(accuracy) ? `Accuracy about ${Math.round(accuracy)} m.` : 'Accuracy unavailable.';
+        }
+
+        function alertStatusFromCode(value) {
+            const code = Number(value);
+
+            if (code === 2) {
+                return 'DANGER';
+            }
+
+            if (code === 1) {
+                return 'WARNING';
+            }
+
+            return 'SAFE';
+        }
+
+        function normalizeHardwarePacket(packet) {
+            if (!packet || typeof packet !== 'object') {
+                return null;
+            }
+
+            const lng = Number(packet.lng ?? packet.longitude);
+            const lat = Number(packet.lat ?? packet.latitude);
+            const coords = [lng, lat];
+
+            if (!hasValidLngLat(coords)) {
+                return null;
+            }
+
+            return {
+                coords,
+                deviceID: packet.deviceID || 'BUS_001',
+                topDistance: Number(packet.topDistance),
+                bottomDistance: Number(packet.bottomDistance),
+                topStatus: packet.topStatus || alertStatusFromCode(packet.topAlert),
+                bottomStatus: packet.bottomStatus || alertStatusFromCode(packet.bottomAlert),
+                timestamp: packet.timestamp ?? null,
+            };
+        }
+
+        function formatHardwareStatus(packet) {
+            if (!packet) {
+                return 'ESP32 GPS not available yet.';
+            }
+
+            const topDistance = Number.isFinite(packet.topDistance) && packet.topDistance >= 0 ?
+                `${packet.topDistance.toFixed(1)} cm ${packet.topStatus}` :
+                `top ${packet.topStatus}`;
+            const bottomDistance = Number.isFinite(packet.bottomDistance) && packet.bottomDistance >= 0 ?
+                `${packet.bottomDistance.toFixed(1)} cm ${packet.bottomStatus}` :
+                `bottom ${packet.bottomStatus}`;
+
+            return `ESP32 ${packet.deviceID}: top ${topDistance}, bottom ${bottomDistance}.`;
         }
 
         function geolocationErrorMessage(error) {
@@ -1084,16 +1141,29 @@
                     firebase.initializeApp(data.config);
                 }
 
-                await firebase.auth().signInWithCustomToken(data.token);
-                state.liveLocationRef = firebase.database().ref(data.live_location_path);
-                state.liveLocationOnDisconnect = state.liveLocationRef.onDisconnect();
-                state.liveLocationOnDisconnect.update({
-                    connection_state: 'offline',
-                    disconnected_at: firebase.database.ServerValue.TIMESTAMP,
+            await firebase.auth().signInWithCustomToken(data.token);
+            state.liveLocationRef = firebase.database().ref(data.live_location_path);
+            state.liveLocationOnDisconnect = state.liveLocationRef.onDisconnect();
+            state.liveLocationOnDisconnect.update({
+                connection_state: 'offline',
+                disconnected_at: firebase.database.ServerValue.TIMESTAMP,
+            });
+
+            if (data.bus_tracker_path && !state.busTrackerRef) {
+                state.busTrackerRef = firebase.database().ref(data.bus_tracker_path);
+                state.busTrackerCallback = snapshot => applyHardwareTrackerPacket(snapshot.val(), {
+                    recenter: !state.currentCoordinates,
+                    forceSync: state.navigationStarted,
                 });
-                state.firebaseReady = true;
-                return true;
-            })().catch(error => {
+                state.busTrackerRef.on('value', state.busTrackerCallback, error => {
+                    console.error(error);
+                    setStatus(error.message || 'Unable to read ESP32 BusTracker location.');
+                });
+            }
+
+            state.firebaseReady = true;
+            return true;
+        })().catch(error => {
                 state.firebaseInitializing = null;
                 state.firebaseReady = false;
                 throw error;
@@ -1122,11 +1192,18 @@
             await state.liveLocationRef.update({
                 latitude: lat,
                 longitude: lng,
+                lat,
+                lng,
                 accuracy: Number.isFinite(Number(state.lastKnownAccuracy)) ? Number(state.lastKnownAccuracy) : null,
                 navigation_session_id: state.navigationSessionId,
                 session_status: 'ongoing',
                 connection_state: 'online',
-                source: 'browser-watchPosition',
+                source: state.locationSource === 'esp32' ? 'esp32-bustracker' : 'browser-watchPosition',
+                deviceID: state.latestHardwarePacket?.deviceID || null,
+                topDistance: Number.isFinite(state.latestHardwarePacket?.topDistance) ? state.latestHardwarePacket.topDistance : null,
+                bottomDistance: Number.isFinite(state.latestHardwarePacket?.bottomDistance) ? state.latestHardwarePacket.bottomDistance : null,
+                topStatus: state.latestHardwarePacket?.topStatus || null,
+                bottomStatus: state.latestHardwarePacket?.bottomStatus || null,
                 updated_at: new Date().toISOString(),
                 updated_at_ms: firebase.database.ServerValue.TIMESTAMP,
             });
@@ -1190,6 +1267,7 @@
 
             state.currentCoordinates = coords;
             state.lastKnownAccuracy = position.coords.accuracy;
+            state.locationSource = 'browser';
             setCurrentMarker(coords);
 
             if (options.recenter) {
@@ -1208,6 +1286,43 @@
             }
 
             return coords;
+        }
+
+        function applyHardwareTrackerPacket(packet, options = {}) {
+            const hardware = normalizeHardwarePacket(packet);
+
+            if (!hardware) {
+                return state.currentCoordinates;
+            }
+
+            state.latestHardwarePacket = hardware;
+            state.currentCoordinates = hardware.coords;
+            state.lastKnownAccuracy = null;
+            state.locationSource = 'esp32';
+            setCurrentMarker(hardware.coords);
+
+            if (options.recenter) {
+                map.flyTo({
+                    center: hardware.coords,
+                    zoom: 15,
+                    duration: 800,
+                });
+            }
+
+            const coordinateLabel = `${hardware.coords[1].toFixed(7)}, ${hardware.coords[0].toFixed(7)}`;
+            state.currentPlaceLabel = state.currentPlaceLabel || `ESP32 current location (${coordinateLabel})`;
+            currentLocationInput.value = `ESP32 GPS: ${coordinateLabel}`;
+
+            if (state.navigationStarted) {
+                syncNavigationSessionLocation(options.forceSync).catch(error => console.error(error));
+                syncFirebaseLiveLocationSafely(options.forceSync);
+                handleNavigationProgress();
+                setStatus(`Live tracking active from ESP32. ${formatHardwareStatus(hardware)}`);
+            } else {
+                setStatus(`Current location is ready from ESP32. ${formatHardwareStatus(hardware)} Enter a destination to build the route.`);
+            }
+
+            return hardware.coords;
         }
 
         function getFreshPhonePosition() {
@@ -1607,6 +1722,19 @@
         }
 
         async function detectCurrentLocation() {
+            initializeFirebaseLiveLocation().catch(error => console.error(error));
+
+            if (state.latestHardwarePacket && hasValidLngLat(state.latestHardwarePacket.coords)) {
+                applyHardwareTrackerPacket({
+                    ...state.latestHardwarePacket,
+                    lat: state.latestHardwarePacket.coords[1],
+                    lng: state.latestHardwarePacket.coords[0],
+                }, {
+                    recenter: true,
+                });
+                return;
+            }
+
             if (!navigator.geolocation) {
                 setStatus('This browser does not support geolocation.');
                 currentLocationInput.value = 'Location unavailable';
@@ -1694,13 +1822,24 @@
             }
 
             setActionState(true, 'start');
-            setStatus('Refreshing phone GPS before starting...');
+            setStatus(state.locationSource === 'esp32' ? 'Using ESP32 GPS before starting...' : 'Refreshing phone GPS before starting...');
 
             try {
-                const position = await getFreshPhonePosition();
-                applyPhonePosition(position, {
-                    recenter: true,
-                });
+                if (state.locationSource === 'esp32' && state.latestHardwarePacket) {
+                    applyHardwareTrackerPacket({
+                        ...state.latestHardwarePacket,
+                        lat: state.latestHardwarePacket.coords[1],
+                        lng: state.latestHardwarePacket.coords[0],
+                    }, {
+                        recenter: true,
+                    });
+                } else {
+                    const position = await getFreshPhonePosition();
+                    applyPhonePosition(position, {
+                        recenter: true,
+                    });
+                }
+
                 state.previewRoute = null;
                 state.previewProfile = null;
 
@@ -1807,6 +1946,7 @@
         map.on('load', () => {
             ensureRouteLayer();
             resetDirections();
+            initializeFirebaseLiveLocation().catch(error => console.error(error));
             detectCurrentLocation();
         });
 
@@ -1822,6 +1962,10 @@
             }
 
             updateFirebaseSharingState(false).catch(() => {});
+
+            if (state.busTrackerRef && state.busTrackerCallback) {
+                state.busTrackerRef.off('value', state.busTrackerCallback);
+            }
         });
     </script>
 </body>

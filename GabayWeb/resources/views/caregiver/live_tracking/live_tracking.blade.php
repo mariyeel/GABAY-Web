@@ -249,6 +249,31 @@
             margin-bottom: 14px;
         }
 
+        .sensor-grid {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 10px;
+        }
+
+        .sensor-item {
+            padding: 12px;
+            border-radius: 8px;
+            background: rgba(255, 255, 255, 0.045);
+            border: 1px solid rgba(255, 255, 255, 0.07);
+        }
+
+        .sensor-item strong {
+            display: block;
+            color: #fff;
+            font-size: 0.84rem;
+            margin-bottom: 4px;
+        }
+
+        .sensor-item span {
+            color: var(--muted);
+            font-size: 0.82rem;
+        }
+
         .location-item {
             display: grid;
             grid-template-columns: 12px 1fr;
@@ -556,6 +581,21 @@
                         </div>
                     </div>
                 </article>
+
+                <article class="detail-card">
+                    <h2>ESP32 Sensor Data</h2>
+                    <div class="sensor-grid">
+                        <div class="sensor-item">
+                            <strong>Top Sensor</strong>
+                            <span id="top-sensor-text">Waiting for ESP32.</span>
+                        </div>
+                        <div class="sensor-item">
+                            <strong>Bottom Sensor</strong>
+                            <span id="bottom-sensor-text">Waiting for ESP32.</span>
+                        </div>
+                    </div>
+                    <div class="meta" id="hardware-source" style="margin-top: 12px;">No hardware packet received yet.</div>
+                </article>
             @endif
         </section>
 
@@ -594,6 +634,9 @@
             originText: document.getElementById('origin-text'),
             currentText: document.getElementById('current-text'),
             destinationText: document.getElementById('destination-text'),
+            topSensorText: document.getElementById('top-sensor-text'),
+            bottomSensorText: document.getElementById('bottom-sensor-text'),
+            hardwareSource: document.getElementById('hardware-source'),
             mapStatus: document.getElementById('map-status'),
             pollingStatus: document.getElementById('polling-status'),
             refreshButton: document.getElementById('refresh-tracking'),
@@ -608,6 +651,8 @@
             lastRouteDrawAt: 0,
             firebaseRef: null,
             firebaseCallback: null,
+            busTrackerRef: null,
+            busTrackerCallback: null,
             firebaseReady: false,
             pollingIntervalId: null,
             latestSession: initialTrackingData?.session || null,
@@ -695,6 +740,45 @@
             }
 
             return `${point.lat.toFixed(6)}, ${point.lng.toFixed(6)}`;
+        }
+
+        function normalizeHardwarePacket(packet) {
+            if (!packet || typeof packet !== 'object') {
+                return null;
+            }
+
+            const point = normalizeCoordinate(packet);
+
+            return {
+                point,
+                deviceID: packet.deviceID || 'BUS_001',
+                topDistance: Number(packet.topDistance),
+                bottomDistance: Number(packet.bottomDistance),
+                topStatus: packet.topStatus || alertStatusFromCode(packet.topAlert),
+                bottomStatus: packet.bottomStatus || alertStatusFromCode(packet.bottomAlert),
+                timestamp: packet.timestamp ?? null,
+            };
+        }
+
+        function alertStatusFromCode(value) {
+            const code = Number(value);
+
+            if (code === 2) {
+                return 'DANGER';
+            }
+
+            if (code === 1) {
+                return 'WARNING';
+            }
+
+            return 'SAFE';
+        }
+
+        function formatSensor(distance, status) {
+            const value = Number(distance);
+            const distanceText = Number.isFinite(value) && value >= 0 ? `${value.toFixed(1)} cm` : 'No reading';
+
+            return `${distanceText} - ${status || 'SAFE'}`;
         }
 
         function formatTime(value) {
@@ -993,6 +1077,56 @@
             }
         }
 
+        function mergeBusTrackerData(packet) {
+            try {
+                const hardware = normalizeHardwarePacket(packet);
+
+                if (!hardware) {
+                    return;
+                }
+
+                if (elements.topSensorText) {
+                    elements.topSensorText.textContent = formatSensor(hardware.topDistance, hardware.topStatus);
+                }
+
+                if (elements.bottomSensorText) {
+                    elements.bottomSensorText.textContent = formatSensor(hardware.bottomDistance, hardware.bottomStatus);
+                }
+
+                if (elements.hardwareSource) {
+                    elements.hardwareSource.textContent =
+                        `Device ${hardware.deviceID} is writing to Realtime Database path BusTracker/${hardware.deviceID}.`;
+                }
+
+                if (!hardware.point) {
+                    return;
+                }
+
+                const baseSession = state.latestSession || {};
+                const session = {
+                    ...baseSession,
+                    status: baseSession.status || 'ongoing',
+                    location_updated_at: new Date().toISOString(),
+                    current_coordinates: {
+                        lat: hardware.point.lat,
+                        lng: hardware.point.lng,
+                    },
+                };
+
+                renderTrackingData({
+                    patient: state.latestPatient,
+                    session,
+                });
+
+                elements.pollingStatus.textContent = 'ESP32 BusTracker listener active';
+                elements.lastUpdate.textContent =
+                    `ESP32 GPS update: ${formatCoords(session.current_coordinates)}`;
+            } catch (error) {
+                console.error(error);
+                elements.mapStatus.textContent = error.message || 'Unable to render ESP32 tracker data.';
+            }
+        }
+
         async function fetchJson(url) {
             const response = await fetch(url, {
                 headers: {
@@ -1033,6 +1167,16 @@
                 elements.mapStatus.textContent = error.message || 'Firebase live tracking listener failed.';
                 startPollingFallback();
             });
+
+            if (data.bus_tracker_path) {
+                state.busTrackerRef = firebase.database().ref(data.bus_tracker_path);
+                state.busTrackerCallback = snapshot => mergeBusTrackerData(snapshot.val());
+                state.busTrackerRef.on('value', state.busTrackerCallback, error => {
+                    console.error(error);
+                    elements.mapStatus.textContent = error.message || 'ESP32 BusTracker listener failed.';
+                });
+            }
+
             state.firebaseReady = true;
             elements.pollingStatus.textContent = 'Firebase live listener active';
             return true;
@@ -1050,6 +1194,10 @@
         function cleanupLiveTracking() {
             if (state.firebaseRef && state.firebaseCallback) {
                 state.firebaseRef.off('value', state.firebaseCallback);
+            }
+
+            if (state.busTrackerRef && state.busTrackerCallback) {
+                state.busTrackerRef.off('value', state.busTrackerCallback);
             }
 
             if (state.pollingIntervalId !== null) {
