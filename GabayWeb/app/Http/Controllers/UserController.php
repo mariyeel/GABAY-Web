@@ -334,12 +334,29 @@ class UserController extends Controller
                 ->withErrors(['login' => 'Please log in as a navigator user first to view the patient dashboard.']);
         }
 
+        $connectedCaregivers = Pairing::query()
+            ->with('caregiver')
+            ->where('vi_user_id', $patient->user_id)
+            ->where('status', 'active')
+            ->latest('paired_at')
+            ->latest('id')
+            ->get()
+            ->pluck('caregiver')
+            ->filter()
+            ->values();
+
         return view('patient.patient_dashboard.main_dashboard', [
             'patient' => $patient,
-            'connectedCaregiverCount' => Pairing::query()
-                ->where('vi_user_id', $patient->user_id)
-                ->where('status', 'active')
-                ->count(),
+            'connectedCaregiverCount' => $connectedCaregivers->count(),
+            'connectedCaregivers' => $connectedCaregivers,
+            'isPairingCodeValid' => !empty($patient->pairing_code)
+                && (!$patient->code_expires_at || $patient->code_expires_at->isFuture()),
+            'recentSessions' => NavigationSession::query()
+                ->where('user_id', $patient->user_id)
+                ->latest('start_time')
+                ->latest('id')
+                ->limit(3)
+                ->get(),
         ]);
     }
 

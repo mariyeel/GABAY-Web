@@ -79,5 +79,41 @@ class PatientDashboardCaregiverCountTest extends TestCase
 
         $this->assertSame('patient.patient_dashboard.main_dashboard', $response->name());
         $this->assertSame(2, $response->getData()['connectedCaregiverCount']);
+        $this->assertTrue($response->getData()['isPairingCodeValid']);
+        $this->assertCount(2, $response->getData()['connectedCaregivers']);
+    }
+
+    public function test_patient_dashboard_hides_expired_pairing_code_but_keeps_caregivers(): void
+    {
+        $patient = User::create([
+            'name' => 'Patient One',
+            'email' => 'patient-expired@example.com',
+            'password' => 'password123',
+            'role' => 'vi',
+            'pairing_code' => 'OLD123',
+            'code_expires_at' => now()->subMinute(),
+        ]);
+
+        $caregiver = User::create([
+            'name' => 'Caregiver One',
+            'email' => 'caregiver-expired@example.com',
+            'password' => 'password123',
+            'role' => 'caregiver',
+            'pairing_code' => null,
+            'code_expires_at' => null,
+        ]);
+
+        Pairing::create([
+            'vi_user_id' => $patient->user_id,
+            'caregiver_user_id' => $caregiver->user_id,
+            'status' => 'active',
+            'paired_at' => now(),
+        ]);
+
+        $response = $this->actingAs($patient)->get('/patient/dashboard');
+
+        $response->assertOk();
+        $response->assertDontSee('OLD123');
+        $response->assertSee('Caregiver One');
     }
 }
